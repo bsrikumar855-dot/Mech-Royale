@@ -61,12 +61,19 @@ export const LOCOMOTION = {
   /** Range control: radial blend added to the perpendicular strafe (negative = away from the threat). */
   retreatBlend: -0.55,
   backpedalBlend: -0.5,
-  approachBlend: 0.3,
   woundedHpFrac: 0.42,
   closeM: 42,
   closeLightningM: 52,
+  /** Beyond this, v11 never chases a healthy enemy forward (pure strafe, biased toward the quiet rim near the centre). */
   farM: 95,
-  approachMinHpFrac: 0.65,
+  /** v11 opportunistic finish beyond farM: ONE shot-line enemy below finishMaxHp, us above finishMinHpFrac, in the
+   * safe rim -> forward push finishBlend on top of the strafe. */
+  finishMaxHp: 350,
+  finishMinHpFrac: 0.55,
+  finishBlend: 0.35,
+  /** v11: beyond farM and within this fraction of the next radius from its centre, bias the strafe toward the rim. */
+  rimStrafeBiasInsideFrac: 0.5,
+  rimStrafeBias: 0.25,
   /** Any move whose 4 m lookahead leaves the safe rim is bent back inward. */
   rimLookaheadM: 4,
 
@@ -138,11 +145,44 @@ export const LOCOMOTION = {
   // ---- idle
   /** Below this HP, safe and unthreatened: stand still (silent) so the out-of-combat regen runs. */
   regenHoldHpFrac: 0.85,
-  /** Healthy and idle: patrol along a band of the next circle (fraction of its radius). */
-  patrolInnerFrac: 0.4,
-  patrolOuterFrac: 0.75,
   /** Smaller next circles than this: patrol around the current one instead. */
   patrolMinRadiusM: 20,
+
+  // ---- v11 decaying threat map (enemy sightings + weapon sounds), see src/locomotion/threatmap.ts
+  threatMapCap: 16,
+  threatDecayS: 12,
+  threatEnemyWeight: 1,
+  threatSoundWeight: 0.6,
+  /** Representative source distance per sound bucket (protocol: near < 60 m, mid 60-160 m, far beyond). */
+  threatSoundRangeM: { near: 35, mid: 110, far: 220 } as Readonly<Record<string, number>>,
+  /** Falloff: a threat d metres away counts 1 / (1 + (d / threatScaleM)^2). */
+  threatScaleM: 60,
+
+  // ---- v11 quiet outer-rim patrol (replaces the 40-75% centre band)
+  rimSectors: 12,
+  /** Candidate radii, outermost first, as fractions of the next radius; the first one inside the safe rim (and
+   * rimMarginM inside the current radius) and walkable is used for that sector. */
+  rimFracs: [0.88, 0.83, 0.78] as readonly number[],
+  rimMarginM: 8,
+  /** Sector score = threat * rimThreatWeight + arc travel (rad) * rimTravelWeight - (current sector ? rimHysteresis). */
+  rimThreatWeight: 100,
+  /** Rim scoring uses the threat falloff scale max(threatScaleM, rimThreatScaleFrac * R). */
+  rimThreatScaleFrac: 0.5,
+  rimTravelWeight: 2,
+  rimHysteresis: 15,
+  /** Farther than this (rad) around the circle: travel along the rim arc (tangent + radial hold), never across the
+   * centre; the arc side is chosen once per sector by arc length + threat at the arc midpoint. */
+  rimArcDirectRad: 0.7,
+  /** Radial correction toward the sector radius: clamp((r - d) / (rimRadialScaleFrac * R), -1, 1). */
+  rimRadialScaleFrac: 0.2,
+  /** Within this of the sector point: wander along the rim, turning back past +-rimWanderRad around the sector. */
+  rimArriveM: 10,
+  rimWanderRad: Math.PI / 12,
+
+  // ---- v11 threat-aware loot (idle loot pick only): value / (1 + lootThreatWeight * threat); drones and crates
+  // within lootThreatSkipM of an active threat entry are skipped
+  lootThreatWeight: 1.5,
+  lootThreatSkipM: 45,
 
   // ---- wall feeler
   feelerStepM: 4,

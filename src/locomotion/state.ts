@@ -7,6 +7,7 @@
 import { LOCOMOTION as L } from "../config/index.ts"
 import type { Vec2 } from "../types/mechfight.ts"
 import type { WorldModel } from "../world/world.ts"
+import { ThreatMap } from "./threatmap.ts"
 
 /** Deterministic hash -> [0, 1). Timings vary per slot and per event, but replays are reproducible. */
 export function hash01(n: number): number {
@@ -37,7 +38,17 @@ export class LocoState {
   isBoosting = false
   patrolSign: 1 | -1 = 1
 
+  /** v11: decaying threat map, the committed quiet-rim sector, and the arc side chosen to reach it. */
+  readonly threats = new ThreatMap()
+  rimSector: number | null = null
+  rimArcSign: 1 | -1 | 0 = 0
+  rimArcFor: number | null = null
+
   reset(): void {
+    this.threats.clear()
+    this.rimSector = null
+    this.rimArcSign = 0
+    this.rimArcFor = null
     this.lastTick = null
     this.lastPos = null
     this.strafeSign = 1
