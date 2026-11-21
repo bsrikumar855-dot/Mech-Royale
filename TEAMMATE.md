@@ -88,8 +88,13 @@ python _kit/check/check.py --map-dir /arena -- docker run --rm -i --network none
 
 `check.py` replays recorded observations that **do not react to our actions**: it proves we do not crash or stall, not that we play well. Test your logic with synthetic `Observation` fixtures (`test/fixtures/obs.json` has 26 real ones; `test/helpers.ts` has `fixtureHello()` / `fixtureObs()` and a tiny exact synthetic map).
 
-## Phase 1 ask (first submission, keep it dumb and safe)
+## Phase 1 status (v1 rules are IMPLEMENTED in `src/combat/` and `src/economy/`)
 
-- **Combat:** if an enemy is listed and `hasShotLOS` is clear and in range, aim with gun lead and fire slot 0; otherwise `hasTarget: false` with `threatBearing = world.recentThreatBearing(3)`. Reload when the mag is empty. No laser/mortar tricks yet.
-- **Economy:** `pick` = a fixed preference list over `offer.choices[].id` (armor, plating, nanites first); `take` a pickup within `loot.pickup_radius` when a slot is free; `lootTargets` = visible cubes and pickups, values by distance.
-- Phase 2 (utility scoring, hysteresis, weapon-triangle play) is deferred until v1 has a score and the noise is measured (`EXPERIMENTS.md`).
+Read the rule tables in `CLAUDE.md` ("Phase 1 rules") and the tests in `test/combat.test.ts` / `test/economy.test.ts` before changing anything: they pin the behaviour (slew gate, lightning-only take, NPC rule, reload rule, threat-bearing priority).
+
+Next, in value order (each one a **separate single-variable submission**, see `EXPERIMENTS.md`):
+1. Distance-scaled fire gate (a fixed 0.15 rad wastes shots at range: at 100 m it is a 15 m miss).
+2. Crates and supply drops as `LootTarget`s (`obs.drops` is always known; capture needs 4 s alone in the 8 m ring).
+3. Laser (hold to charge, release to fire; never drop it while charging) and the weapon triangle.
+4. Mortar ballistics (pitch sets range, own splash 50%, concussion) before ever taking one again.
+Phase 2 (utility scoring, hysteresis) stays deferred until v1 has a score and the noise is measured.

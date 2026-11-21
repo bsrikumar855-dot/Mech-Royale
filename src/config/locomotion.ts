@@ -27,6 +27,34 @@ export const WORLD = {
   damageMemoryS: 5,
 } as const
 
+/** Phase 1 movement rules (simple rules only; utility scoring + hysteresis are deferred until v1 is scored). */
+export const LOCOMOTION = {
+  /** Plan against the zone this many seconds ahead (zoneAt(t + zoneLeadS)). */
+  zoneLeadS: 10,
+  /** Stay inside this fraction of the current AND upcoming radius; the rim is where the damage and the crowd are. */
+  safeRadiusFrac: 0.85,
+  /** Boost only above this energy, and only when actually outside the zone. */
+  boostMinEnergy: 20,
+
+  /** An enemy mech this close (horizontal, m) makes us back away while safely inside the zone. */
+  kiteRangeM: 40,
+  /** Weight of the sideways strafe blended into the backpedal. */
+  kiteStrafeBlend: 0.35,
+  /** If the kite step would leave the safe zone, we look this far ahead and bend inward. */
+  kiteLookaheadM: 4,
+
+  /** Loot detour: only targets this close, only when no enemy mech is nearer than lootEnemyClearM. */
+  lootDetourM: 25,
+  lootEnemyClearM: 35,
+  /** Stop walking once this close to a loot target (pickup radii are 3.5 and 4 m). */
+  lootArriveM: 1.5,
+
+  /** Wall feeler: probe this far along the desired heading (at half and full distance). */
+  feelerStepM: 4,
+  /** Rotated headings tried, in order, when the straight probe is blocked. */
+  steerAnglesDeg: [30, -30, 60, -60, 90, -90, 120, -120] as readonly number[],
+} as const
+
 export const MAP = {
   gridCellM: 16,
   treeCellM: 16,

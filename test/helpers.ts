@@ -2,7 +2,10 @@ import { existsSync, readFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { MapQuery, type WorldJson } from "../src/world/map.ts"
 import { parseTerrainI16 } from "../src/world/mapLoader.ts"
-import type { Hello, Observation } from "../src/types/mechfight.ts"
+import type { ActorObs, Hello, Observation } from "../src/types/mechfight.ts"
+import type { TickContext } from "../src/types/contracts.ts"
+import { NO_DEADLINE } from "../src/runtime/deadline.ts"
+import { WorldModel } from "../src/world/world.ts"
 
 export const ROOT = resolve(import.meta.dirname, "..")
 export const ARENA_DIR = process.env["ARENA_DIR"] ?? join(ROOT, "_kit", "arena")
@@ -56,6 +59,51 @@ export function realMap(): { map: MapQuery; world: WorldJson; raw: Int16Array } 
   const world = JSON.parse(readFileSync(join(ARENA_DIR, "v2", "world.json"), "utf8")) as WorldJson
   const raw = parseTerrainI16(readFileSync(join(ARENA_DIR, "v2", "terrain.i16")))
   return { map: new MapQuery(world, raw), world, raw }
+}
+
+/** A clean, fully-specified observation: us at `pos`, aim [0,0], gun loaded, slot 1 empty, a huge safe zone, nothing else. */
+export function cleanObs(patch: (o: Observation) => void = () => {}, hello: Hello = fixtureHello()): Observation {
+  const o = structuredClone(fixtureObs()[0] as Observation)
+  const cfg = hello.config
+  o.tick = 200
+  o.t = 10
+  o.self.pos = [0, 0, 0]
+  o.self.vel = [0, 0, 0]
+  o.self.aim = [0, 0]
+  o.self.in_zone = true
+  o.self.energy = 100
+  o.self.stats = { ...(cfg.mech as Record<string, number>) }
+  o.self.weapons = [{ kind: "gun", cooldown: 0, ammo: 12, reload: 0, stats: { ...(cfg.weapons.gun as Record<string, number>) } }, null]
+  o.mechs = []
+  o.projectiles = []
+  o.crates = []
+  o.cubes = []
+  o.pickups = []
+  o.sounds = []
+  o.beams = []
+  o.events = []
+  o.drops = []
+  o.offer = null
+  o.zone = { center: [0, 0], radius: 500, next_center: [0, 0], next_radius: 500, shrink_start: 1e6, shrink_end: 1e6 + 1, dps: 20 }
+  patch(o)
+  return o
+}
+
+export const lightningWeapon = (hello: Hello = fixtureHello()): NonNullable<Observation["self"]["weapons"][1]> => ({
+  kind: "lightning",
+  cooldown: 0,
+  stats: { ...(hello.config.weapons.lightning as Record<string, number>) },
+})
+
+export function enemy(id: number, pos: [number, number, number], over: Partial<ActorObs> = {}): ActorObs {
+  return { id, kind: "mech", pos, vel: [0, 0, 0], aim: [0, 0], hp: 1400, max_hp: 1400, weapons: ["gun"], charging: false, ...over }
+}
+
+/** A WorldModel that has seen `obs`, plus the TickContext the modules receive. */
+export function ctxFor(obs: Observation, map: MapQuery | null = null, world?: WorldModel): TickContext {
+  const w = world ?? new WorldModel(fixtureHello())
+  w.update(obs)
+  return { world: w, map, deadline: NO_DEADLINE }
 }
 
 if (!HAS_ARENA) {

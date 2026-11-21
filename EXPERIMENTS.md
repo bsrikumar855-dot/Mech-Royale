@@ -24,4 +24,5 @@ Every submission is a **single-variable experiment** (cap: 4 submissions per hou
 | Commit | Time (IST) | Single-Variable Change | Score | Delta | p99 Tick ms | Decision (Keep/Revert) | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | _(scaffold)_ | Sat 21 Nov | Phase 0: stub modules, inert bot (stands still, never fires) | not submitted | | 0.88 (pinned-core proxy, not Docker) | n/a | Pipeline proof only. First real row is Phase 1 v1. |
+| _(v1 candidate)_ | Sat 21 Nov | Phase 1 rules: zone safety, kiting, wall feeler, loot detour, gun lead + slew gate, lightning-only take, upgrade priority, defensive facing | | | 3.51 (pinned-core proxy, not Docker) | | Submit twice (same commit) for the noise calibration. |
 | | | | | | | | |

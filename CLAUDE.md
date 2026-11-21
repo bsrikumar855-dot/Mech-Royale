@@ -63,8 +63,8 @@ stdin ─► LineSplitter ─► Session ─► Bot.decide ─► sendMessage �
 
 ### Phase gates
 
-- **Phase 0 (this scaffold):** stubs, tests, Docker, bench. Done when sandboxed `check.py` passes.
-- **Phase 1 (rules, first submission):** zone survival, rear-armor facing, basic gun lead, offer auto-pick, cube/weapon pickup. Submit v1 **twice** (same commit) to measure score noise.
+- **Phase 0 (scaffold, commit `bcf9f9a`):** inert stubs, tests, Docker, bench. Done when sandboxed `check.py` passes (NOT yet run: no Docker locally; submit it to the platform to verify the build).
+- **Phase 1 (rules, implemented, v1 candidate):** zone survival, kiting, wall feeler, short safe loot detour, gun lead with a slew-tolerance fire gate, lightning-only weapon take, 22-upgrade priority, defensive facing. Submit v1 **twice** (same commit) to measure score noise.
 - **Phase 2 (DEFERRED until v1 is scored):** utility grid scoring + hysteresis, advanced combat, weapon-triangle play.
 - `best-known-good` git tag advances only after sandboxed `check.py` passes AND the score beats the measured noise threshold.
 
@@ -72,13 +72,24 @@ stdin ─► LineSplitter ─► Session ─► Bot.decide ─► sendMessage �
 
 ```powershell
 npm ci                    # install pinned dev dependencies
-npm run check             # typecheck + 56 unit tests + build  (run before every commit)
+npm run check             # typecheck + 131 unit tests + build  (run before every commit)
 npm test                  # unit tests only (real-map tests need _kit/arena or ARENA_DIR)
 npm run gen:types         # regenerate src/types/mechfight.ts from schema/mechfight.schema.json
 npm run bench             # latency bench of dist/index.js (local, unpinned)
 bash scripts/sandbox-check.sh   # Docker build + check.py + bench INSIDE the full sandbox flags
 python _kit/check/check.py -- node dist/index.js   # kit check without Docker (fast inner loop only)
 ```
+
+
+### Phase 1 rules (what v1 actually does; all constants in `src/config/`)
+
+| Module | Rule |
+| --- | --- |
+| Economy | `pick` = best-ranked offer choice by `ECONOMY.upgradePriority` (all 22 ids ranked, survival/mobility first: armor, plating, nanites, servos, reactor, capacitor, jets, gyros, sensors, then gun, lightning, laser, mortar). `take` ONLY `lightning`, ONLY into an empty slot, within `loot.pickup_radius` (4 m) and 4 m vertically. Mortar (cook-off exposure, no ballistics yet) and laser are skipped. `LootTarget[]` = visible cubes + wanted lightning pickups, value = base / (1 + dist/20). |
+| Combat | Target = best visible enemy **mech** with `hasShotLOS` in range (score = dist x (0.5 + hp fraction), lower wins). Drones only within 35 m and only when no enemy mech is visible at all. Aim = linear lead from the real muzzle to centre of mass using the gun's upgraded speed. **Fire only when the ACTUAL slewed aim is within 0.15 rad of the lead aim**, with ammo and not mid-reload. Lightning (any slot): LOS, in range, target inside the 30 deg cone of the actual yaw, energy > 15. Reload when empty, or when no enemy mech has LOS and ammo <= 6. No target -> `hasTarget: false` + `threatBearing` (damage bearing > listed-but-unshootable enemy > last seen enemy > nearest combat sound) so the Arbiter faces the threat. |
+| Locomotion | Priority: (1) outside the zone, or outside 85% of the current/`zoneAt(t+10)` radius -> head to the upcoming centre, boost only when actually outside the zone and energy > 20; (2) enemy mech within 40 m while safely inside -> back away with a 0.35 strafe toward the safe side, bent inward if it would leave the safe zone; (3) no enemy mech within 35 m -> walk to the best-value loot target within 25 m (inside the safe zone); (4) otherwise **stand still** (silent). Every heading passes a wall feeler: probe 2 m and 4 m ahead with `MapQuery.isBlockedAt` + slope + map edge, then try +-30, 60, 90, 120 deg. Never jumps in v1. |
+
+Known v1 limits (deliberate): no mortar/laser play, no jump over ledges, no zone-aware pathfinding (the feeler is local), no crate or supply-drop looting, no hysteresis (headings can flip between ticks), fire gate is a fixed angle (not distance-scaled), lead assumes constant target velocity, stands still when nothing is happening.
 
 ---
 
@@ -167,6 +178,8 @@ Harness: `scripts/bench.py` (lock-step, same definition of latency as the server
 | Kit Python starter (pinned) | 133 ms | 0.32 | 0.38 | 0.47 | 0.90 | 0 |
 
 `MapQuery` (real arena, in `npm test`): load + index **8-20 ms**; `hasShotLOS` over 150 m **~9-14 us/call**.
+
+**Phase 1 (real rules) re-measured 2026-11-21**, same harness, Node 22.23.5: pinned to one core `ready` 76 ms, tick p50 0.25 / p95 0.57 / **p99 3.51** / p99.9 5.90 / max 6.08 ms, 0% late; unpinned p50 0.28 / p95 0.54 / p99 0.81 / max 1.34 ms; kit `check.py` PASS 300/300. Synthetic worst case in `npm test` (15 enemies, 80 cubes, 40 pickups, real map): `decide()` p50 0.09 / p99 0.24 / max 1.2 ms. The pinned p99 rose from 0.9 to 3.5 ms versus the empty-bot floor: cold (not yet JIT-compiled) paths in the first ticks of each 300-tick run are the likely cause (unverified); it is still about a tenth of the 34 ms budget.
 
 **COMPUTE_BUDGET_MS = 50 - p99OverheadMs - safetyMarginMs = 50 - 1 - 15 = 34 ms** (`RUNTIME.computeBudgetMs`). The 15 ms safety margin is deliberately large because Docker's own pipe/cgroup overhead is unmeasured. It is a provisional number until `scripts/sandbox-check.sh` is run on a Docker machine.
 

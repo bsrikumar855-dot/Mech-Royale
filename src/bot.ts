@@ -5,9 +5,9 @@
  * which answers with its crash fallback (last good move/aim, see session.ts).
  */
 import { mergeAction } from "./arbiter.ts"
-import { StubCombat } from "./combat/index.ts"
-import { StubEconomy } from "./economy/index.ts"
-import { StubLocomotion } from "./locomotion/index.ts"
+import { RuleCombat } from "./combat/index.ts"
+import { RuleEconomy } from "./economy/index.ts"
+import { RuleLocomotion } from "./locomotion/index.ts"
 import { warn } from "./runtime/log.ts"
 import type { Deadline } from "./runtime/deadline.ts"
 import type { Combat, CombatOutput, Economy, EconomyOutput, Locomotion, LocomotionOutput, TickContext } from "./types/contracts.ts"
@@ -21,14 +21,14 @@ export interface Modules {
   locomotion: Locomotion
 }
 
-export const stubModules = (): Modules => ({ economy: new StubEconomy(), combat: new StubCombat(), locomotion: new StubLocomotion() })
+export const defaultModules = (): Modules => ({ economy: new RuleEconomy(), combat: new RuleCombat(), locomotion: new RuleLocomotion() })
 
 export class Bot {
   readonly world: WorldModel
   readonly map: MapQuery | null
   readonly modules: Modules
 
-  constructor(world: WorldModel, map: MapQuery | null, modules: Modules = stubModules()) {
+  constructor(world: WorldModel, map: MapQuery | null, modules: Modules = defaultModules()) {
     this.world = world
     this.map = map
     this.modules = modules
