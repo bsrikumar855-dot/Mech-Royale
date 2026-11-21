@@ -5,6 +5,8 @@ import { LOCOMOTION as L } from "../src/config/index.ts"
 import { EvasiveLocomotion } from "../src/locomotion/index.ts"
 import { LocoState } from "../src/locomotion/state.ts"
 import { blockedAhead, steer } from "../src/locomotion/steer.ts"
+import { sliceCover } from "../src/locomotion/cover.ts"
+import { findLedge } from "../src/locomotion/climb.ts"
 import { NO_DEADLINE } from "../src/runtime/deadline.ts"
 import type { Observation, WeaponObs } from "../src/types/mechfight.ts"
 import type { MapQuery } from "../src/world/map.ts"
@@ -357,5 +359,199 @@ describe("integration", () => {
       assert.ok(a.move && Number.isFinite(a.move[0]) && Math.hypot(a.move[0], a.move[1]) <= 1 + 1e-9)
       assert.doesNotThrow(() => JSON.stringify(a))
     }
+  })
+})
+
+// ------------------------------------------------------------------ Locomotion v4
+const zoneAt = (o: Observation, x: number, y: number, r = 500): void => {
+  o.zone = { center: [x, y], radius: r, next_center: [x, y], next_radius: r, shrink_start: 1e6, shrink_end: 1e6 + 1, dps: 20 }
+}
+
+describe("v4: 2v1+ corner slicing", { skip: !HAS_ARENA && "arena not found" }, () => {
+  // found by a search over the real arena: open ground beside a building, two shooters 70 m out, 63 deg apart
+  const P: [number, number, number] = [-60.35, 134.81, -0.99]
+  const E1: [number, number, number] = [-62.17, 204.79, -1.76]
+  const E2: [number, number, number] = [-123.54, 164.93, -5.13]
+  const map = HAS_ARENA ? realMap().map : (null as unknown as MapQuery)
+  const at = (mechs: ReturnType<typeof enemy>[], over: (o: Observation) => void = () => {}) =>
+    new Runner(map).step((o) => {
+      o.self.pos = [...P]
+      zoneAt(o, P[0], P[1])
+      o.mechs = mechs
+      over(o)
+    })
+
+  test("2 shooters: picks the probe that drops exposure 2 -> 0/1 and boosts behind the corner", () => {
+    const r = at([enemy(5, E1), enemy(6, E2)])
+    assert.equal(r.sense.losCount, 2, "precondition: both have a shot line")
+    assert.equal(r.mode, "cover")
+    assert.equal(r.out.boost, true, "snap behind the corner (energy 100 >= 28)")
+    const w = new WorldModel(hello)
+    w.update(scene((o) => { o.self.pos = [...P]; zoneAt(o, P[0], P[1]); o.mechs = [enemy(5, E1), enemy(6, E2)] }))
+    const pick = sliceCover(map, w, r.sense, { inSafe: () => true, prevHeading: null, roof: false })!
+    assert.equal(pick.current, 2)
+    assert.ok(pick.exposed <= 1, `exposed ${pick.exposed}`)
+    assert.ok(dot(r.out.move, pick.dir) > 0.9, `moves toward the probe: ${r.out.move} vs ${pick.dir}`)
+  })
+  test("boost latch: starts at >= 28 energy, holds down to 14, then stops", () => {
+    const r = new Runner(map)
+    const s = (energy: number) => r.step((o) => { o.self.pos = [...P]; zoneAt(o, P[0], P[1]); o.self.energy = energy; o.mechs = [enemy(5, E1), enemy(6, E2)] })
+    assert.equal(s(27).out.boost, false, "27 < 28: no start")
+    assert.equal(s(28).out.boost, true)
+    assert.equal(s(15).out.boost, true, "latched")
+    assert.equal(s(13).out.boost, false, "below 14: released")
+  })
+  test("1v1 healthy in open LOS still strafes (no hiding), even with a hiding probe 12 m away", () => {
+    const r = at([enemy(6, E2)])
+    assert.equal(r.sense.losCount, 1)
+    const w = new WorldModel(hello)
+    w.update(scene((o) => { o.self.pos = [...P]; zoneAt(o, P[0], P[1]); o.mechs = [enemy(6, E2)] }))
+    assert.equal(sliceCover(map, w, r.sense, { inSafe: () => true, prevHeading: null, roof: false })!.exposed, 0, "precondition: cover exists")
+    assert.equal(r.mode, "strafe")
+  })
+  test("1v1 critically wounded vs a non-finishable shooter slices; vs a finishable one (<= 300 HP) it does not", () => {
+    const wounded = (hp: number) => at([enemy(5, E1, { hp })], (o) => (o.self.hp = 0.3 * o.self.max_hp))
+    assert.notEqual(wounded(1400).mode, "strafe")
+    assert.notEqual(wounded(250).mode, "cover")
+  })
+})
+
+describe("v4: ledge and rooftop climbing (synthetic building A: 0..10 x 0..10, top 20)", () => {
+  const map = syntheticMap()
+  const ME: [number, number, number] = [-4, 5, -0.4]
+  const FOE = (): ReturnType<typeof enemy> => enemy(5, [-4, -40, -0.4])
+  /** 45% HP with an enemy 45 m away: pressure (< 50% HP, < 55 m) but not slice-wounded (>= 42%). */
+  const pressured = (o: Observation): void => {
+    o.self.hp = 0.45 * o.self.max_hp
+    o.mechs = [FOE()]
+    zoneAt(o, 0, 0)
+  }
+  const start = () => {
+    const r = new Runner(map)
+    const first = r.step((o) => { pressured(o); o.self.pos = [...ME] })
+    return { r, first }
+  }
+  test("rooftop escape: grounded under pressure -> jump (no boost) toward the roof", () => {
+    const { r, first } = start()
+    assert.equal(first.mode, "climb")
+    assert.equal(r.loco.state.climb.active?.kind, "roof")
+    assert.equal(r.loco.state.climb.active?.top, 20)
+    assert.equal(first.out.jump, true)
+    assert.equal(first.out.boost, false)
+    assert.ok(first.out.move[0] > 0.9, `toward the roof: ${first.out.move}`)
+  })
+  test("airborne: jets (boost) until z >= top + 0.3, then releases and steers onto the roof for ~0.5 s", () => {
+    const { r } = start()
+    const air = (z: number, x = -2) => r.step((o) => { pressured(o); o.self.pos = [x, 5, z]; o.self.grounded = false })
+    const a = air(5)
+    assert.deepEqual([a.mode, a.out.boost, a.out.jump], ["climb", true, false])
+    assert.equal(air(20.2).out.boost, true, "20.2 < 20.3: keep jetting")
+    const land = air(20.35, 0.5)
+    assert.equal(land.mode, "climb")
+    assert.equal(land.out.boost, false, "released at top + 0.3")
+    assert.ok(land.out.move[0] > 0.9, "steers onto the roof")
+    assert.equal(air(20.1, 1.5).out.boost, false, "landing phase: no re-jet")
+    r.step((o) => { pressured(o); o.self.pos = [2, 5, 20] }) // 0.2 s after the release
+    r.step((o) => { pressured(o); o.self.pos = [2.5, 5, 20] })
+    const still = r.step((o) => { pressured(o); o.self.pos = [2.8, 5, 20] })
+    assert.equal(still.mode, "climb", "0.4 s after the release: still steering on")
+    const after = r.step((o) => { pressured(o); o.self.pos = [3, 5, 20] }) // 0.5 s (obs.t drifts below 10.8)
+    assert.notEqual(after.mode, "climb", "landing window over")
+    assert.equal(r.loco.state.climb.last === "done" || r.loco.state.climb.active === null, true)
+  })
+  test("aborts on low energy (< 8)", () => {
+    const { r } = start()
+    const out = r.step((o) => { pressured(o); o.self.pos = [-2, 5, 6]; o.self.grounded = false; o.self.energy = 7 })
+    assert.notEqual(out.mode, "climb")
+    assert.equal(r.loco.state.climb.last, "abort-energy")
+  })
+  test("aborts after 3.5 s without making it", () => {
+    const { r } = start()
+    let last = ""
+    for (let i = 0; i < 40; i++) last = r.step((o) => { pressured(o); o.self.pos = [-2, 5, 6]; o.self.grounded = false }).mode
+    assert.notEqual(last, "climb")
+    assert.equal(r.loco.state.climb.last === "abort-timeout" || r.loco.state.climb.active === null, true)
+    const r2 = start().r
+    for (let i = 0; i < 30; i++) r2.step((o) => { pressured(o); o.self.pos = [-2, 5, 6]; o.self.grounded = false })
+    assert.equal(r2.loco.state.climb.active !== null, true, "3.0 s: still climbing")
+  })
+  test("aborts when a mortar shell is predicted to land on the roof spot", () => {
+    const { r } = start()
+    const tgt = r.loco.state.climb.active!
+    const out = r.step((o) => { pressured(o); o.self.pos = [-2, 5, 6]; o.self.grounded = false; o.projectiles = [{ id: 1, kind: "mortar", pos: [tgt.x, tgt.y, 40], vel: [0, 0, 0] }] })
+    assert.notEqual(out.mode, "climb")
+    assert.equal(r.loco.state.climb.last, "abort-mortar")
+  })
+  test("no rooftop escape below 55 energy, when healthy and unpressured, or under a bridge deck", () => {
+    assert.notEqual(new Runner(map).step((o) => { pressured(o); o.self.pos = [...ME]; o.self.energy = 54 }).mode, "climb")
+    assert.notEqual(new Runner(map).step((o) => { pressured(o); o.self.pos = [...ME]; o.self.hp = o.self.max_hp }).mode, "climb")
+    // under bridge C (x -30..-10, y -5..5, base 14): a building roof would need open sky
+    assert.equal(map.overheadClearance(-12, 0, -1.2) < 25, true, "precondition: deck overhead")
+  })
+  test("ledge clear: a blocked heading into a 2-8 m step jumps it (real arena: a 3.4 m building east of the spot)", { skip: !HAS_ARENA && "arena not found" }, () => {
+    const real = realMap().map
+    const p: [number, number, number] = [-17.24, -112.29, -0.42]
+    const r = new Runner(real)
+    const out = r.step((o) => { o.self.pos = [...p]; zoneAt(o, p[0], p[1]); o.cubes = [{ id: 5001, pos: [p[0] + 12, p[1], 3] }] })
+    assert.equal(out.mode, "climb")
+    assert.equal(r.loco.state.climb.active?.kind, "ledge")
+    assert.ok(Math.abs(r.loco.state.climb.active!.top - 2.95) < 0.05)
+    assert.equal(out.out.jump, true)
+    const low = new Runner(real).step((o) => { o.self.pos = [...p]; zoneAt(o, p[0], p[1]); o.self.energy = 29; o.cubes = [{ id: 5001, pos: [p[0] + 12, p[1], 3] }] })
+    assert.notEqual(low.mode, "climb", "energy < 30: go around instead")
+  })
+  test("findLedge rejects a wall taller than 8 m (building A is 20.4 m above us)", () => {
+    const w = new WorldModel(hello)
+    w.update(scene((o) => (o.self.pos = [...ME])))
+    assert.equal(findLedge(map, w, [1, 0]), null)
+  })
+  test("a world reset (resetCount) or a backwards tick clears the climb", () => {
+    const { r } = start()
+    assert.ok(r.loco.state.climb.active)
+    r.world.reset()
+    const out = r.step((o) => { o.self.pos = [-2, 5, 6]; o.self.grounded = false; zoneAt(o, 0, 0) })
+    assert.notEqual(out.mode, "climb")
+    const b = start().r
+    b.t = 1
+    b.step((o) => { o.self.pos = [-2, 5, 6]; o.self.grounded = false; zoneAt(o, 0, 0) })
+    assert.equal(b.loco.state.climb.active, null)
+  })
+})
+
+describe("v4: rooftop edge safety (on synthetic building A, top 20, edge at x = 10)", () => {
+  const map = syntheticMap()
+  const ROOF: [number, number, number] = [8.5, 5, 20]
+  test("1v1 strafe flips along the roof instead of walking off a ~19 m drop", () => {
+    const r = new Runner(map).step((o) => { o.self.pos = [...ROOF]; zoneAt(o, 0, 0); o.mechs = [enemy(5, [5, -60, 0.5])] })
+    assert.equal(r.mode, "strafe")
+    assert.ok(r.out.move[0] < -0.9, `west along the roof, not east off it: ${r.out.move}`)
+  })
+  test("airborne high above open ground (a hop or a jet) is NOT a roof: no phantom drop blocks every heading", () => {
+    // the 300-tick replay caught this: mid-jet at 6-10 m above the terrain, every probe looked like a drop -> move [0, 0]
+    const r = new Runner(map).step((o) => { o.self.pos = [-30, 30, 8]; o.self.grounded = false; zoneAt(o, 0, 0); o.mechs = [enemy(5, [-30, -30, -3])] })
+    assert.ok(mag(r.out.move) > 0.99, `keeps moving: ${r.out.move}`)
+  })
+  test("unless the zone forces us off the roof", () => {
+    const r = new Runner(map).step((o) => { o.self.pos = [...ROOF]; zoneAt(o, 300, 5, 100); o.self.in_zone = false; o.mechs = [enemy(5, [5, -60, 0.5])] })
+    assert.equal(r.mode, "outside")
+    assert.ok(r.out.move[0] > 0.5, `east, off the roof toward the zone: ${r.out.move}`)
+  })
+  test("wounded on a roof (< 55%) facing a shooter below the edge: steps ~5 m inward to break its line", () => {
+    const r = new Runner(map).step((o) => { o.self.pos = [...ROOF]; zoneAt(o, 0, 0); o.self.hp = 0.5 * o.self.max_hp; o.mechs = [enemy(5, [16, 5, 1.6])] })
+    assert.equal(r.sense.losCount, 1)
+    assert.equal(r.mode, "cover")
+    assert.ok(r.out.move[0] < -0.5, `inward (west), away from the threatened east edge: ${r.out.move}`)
+  })
+  test("roof slice never picks a probe past the edge, even when the ground below would hide us", () => {
+    // shooter far north-west on the ground: the building hides the ground east of it, every roof spot is exposed
+    const foe = enemy(5, [-30, 40, -3])
+    const r = new Runner(map).step((o) => { o.self.pos = [...ROOF]; zoneAt(o, 0, 0); o.self.hp = 0.5 * o.self.max_hp; o.mechs = [foe] })
+    assert.equal(r.sense.losCount, 1)
+    assert.equal(map.hasShotLOS([-30, 40, 4], [13.5, 5, 0.1 * 13.5 + 4.5]), false, "precondition: the ground east of the roof is hidden")
+    const w = new WorldModel(hello)
+    w.update(scene((o) => { o.self.pos = [...ROOF]; zoneAt(o, 0, 0); o.mechs = [foe] }))
+    const pick = sliceCover(map, w, r.sense, { inSafe: () => true, prevHeading: null, roof: true })!
+    assert.equal(map.standingHeightAt(pick.x, pick.y, 20, 1.2, 9), 20, `the probe stays on the roof: ${pick.x}, ${pick.y}`)
+    if (r.mode === "cover") assert.ok(dot(r.out.move, pick.dir) > 0.9, "and that is where we go (the roof rim itself can hide us)")
   })
 })

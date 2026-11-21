@@ -40,6 +40,10 @@ export interface Sensed {
   chargers: SensedEnemy[]
   /** unit vector away from the predicted mortar impacts we stand in, or null */
   mortarEscape: Vec2 | null
+  /** predicted impact points of every mortar shell in flight (climb abort: a shell aimed at our landing spot) */
+  mortarImpacts: Vec2[]
+  /** mortar danger radius (splash + our radius + margin) */
+  mortarDangerM: number
   /** unit vector away from a bullet ray about to pass through us, or null */
   bulletEscape: Vec2 | null
 }
@@ -111,6 +115,7 @@ export function sense(world: WorldModel, map: MapQuery | null, ourRadius: number
   let ex = 0
   let ey = 0
   let inSplash = false
+  const mortarImpacts: Vec2[] = []
   for (const p of obs.projectiles ?? []) {
     if (p.kind !== "mortar") continue
     for (let s = L.mortarStepS; s <= horizon + 1e-9; s += L.mortarStepS) {
@@ -118,6 +123,7 @@ export function sense(world: WorldModel, map: MapQuery | null, ourRadius: number
       const y = p.pos[1] + p.vel[1] * s
       const z = p.pos[2] + p.vel[2] * s - 0.5 * g * s * s
       if (map ? map.isSolid(x, y, z) : z <= pz) {
+        mortarImpacts.push([x, y])
         const d = dist2d(px, py, x, y)
         if (d < danger) {
           inSplash = true
@@ -170,6 +176,8 @@ export function sense(world: WorldModel, map: MapQuery | null, ourRadius: number
     active: enemies.length > 0 || damagedRecently || heard || projs.length > 0,
     chargers,
     mortarEscape,
+    mortarImpacts,
+    mortarDangerM: danger,
     bulletEscape,
   }
 }

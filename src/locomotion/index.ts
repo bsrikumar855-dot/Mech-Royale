@@ -17,11 +17,13 @@ import type { Locomotion, LocomotionOutput, LootTarget, TickContext } from "../t
 import type { Vec2 } from "../types/mechfight.ts"
 import { clamp, dist2d, unit2 } from "../world/geom.ts"
 import type { WorldModel } from "../world/world.ts"
+import { climbStep, findLedge, findRoof, type ClimbTarget } from "./climb.ts"
+import { shouldSlice, sliceCover, type SlicePick } from "./cover.ts"
 import { sense, type Sensed } from "./sense.ts"
 import { LocoState } from "./state.ts"
-import { blockedAhead, steer } from "./steer.ts"
+import { blockedAhead, onRoof, steer } from "./steer.ts"
 
-export type Mode = "mortar" | "outside" | "laserDodge" | "shrink" | "retreat" | "backpedal" | "approach" | "strafe" | "loot" | "rim" | "hold" | "patrol" | "idle"
+export type Mode = "climb" | "cover" | "mortar" | "outside" | "laserDodge" | "shrink" | "retreat" | "backpedal" | "approach" | "strafe" | "loot" | "rim" | "hold" | "patrol" | "idle"
 
 const add = (a: Vec2, b: Vec2, k: number): Vec2 => [a[0] + b[0] * k, a[1] + b[1] * k]
 const norm = (v: Vec2): Vec2 | null => unit2(v[0], v[1])
@@ -72,6 +74,10 @@ export class EvasiveLocomotion implements Locomotion {
     const walk = Math.max(1, world.selfStat("walk_speed", 1))
     const urgent = distNextSafe > 0 && distNextSafe / walk >= Math.max(1, z.shrink_end - t) - L.shrinkBufferS
     const outside = !self.in_zone
+    const zoneForced = outside || urgent
+    const roof = onRoof(map, world)
+    // on a roof, a deep drop is a wall for the feelers, unless the zone is forcing us off
+    const avoidDrop = roof && !zoneForced && !sn.mortarEscape
 
     // ---- strafe side: timer, bullet snap, laser dodge, blocked side
     const underFire = sn.losCount > 0 || sn.damagedRecently || sn.projectileNear
@@ -95,9 +101,36 @@ export class EvasiveLocomotion implements Locomotion {
         }
       }
       const cur0 = side()
-      if (sn.active && cur0 && map && blockedAhead(map, world, cur0, L.strafeBlockProbeM)) S.flipStrafe(t)
+      if (sn.active && cur0 && map && blockedAhead(map, world, cur0, L.strafeBlockProbeM, avoidDrop)) S.flipStrafe(t)
     }
     const perp = side()
+
+    // ---- v4: an active climb runs until it lands or aborts (a mortar on us or the zone take over at once)
+    if (S.climb.active) {
+      if (sn.mortarEscape) S.climb.abort("abort-mortar")
+      else if (zoneForced) S.climb.abort("abort-zone")
+      else {
+        const c = climbStep(S.climb, world, sn)
+        if (c) {
+          this.lastMode = "climb"
+          return c
+        }
+      }
+    }
+
+    // ---- v4: 2v1+ corner slicing / rooftop escape (only on crossfire or critically wounded ticks)
+    let slice: SlicePick | null = null
+    if (map && underFire && !zoneForced && !sn.mortarEscape && sn.chargers.length === 0 && shouldSlice(world, sn, roof)) {
+      const prev = S.sliceHeading && t - S.sliceT <= L.sliceHeadingMemoryS ? S.sliceHeading : null
+      slice = sliceCover(map, world, sn, { inSafe, prevHeading: prev, roof })
+    }
+    const sliceWins = slice !== null && slice.exposed < slice.current
+    const nearestDist = sn.enemies.reduce((m, e) => Math.min(m, e.dist), Infinity)
+    const pressure = sn.losCount >= 2 || (hpFrac < L.roofPressureHpFrac && nearestDist < L.roofPressureNearM)
+    let roofTarget: ClimbTarget | null = null
+    if (map && !sliceWins && underFire && pressure && !zoneForced && !sn.mortarEscape && sn.chargers.length === 0 && self.grounded && energy >= L.roofMinEnergy && !ourLaserCharging) {
+      roofTarget = findRoof(map, world, inSafe)
+    }
 
     // ---- pick a heading
     let dir: Vec2 | null = null
@@ -126,7 +159,19 @@ export class EvasiveLocomotion implements Locomotion {
       const towardThreat: Vec2 = [Math.cos(b), Math.sin(b)]
       const close = sn.enemies.some((e) => e.dist < (e.lightning ? L.closeLightningM : L.closeM))
       const loot = hpFrac > L.closeLootMinHpFrac && sn.losCount <= 1 ? this.pickLoot(world, inSafe, L.closeLootM) : null
-      if (sn.losCount >= 2 || hpFrac < L.woundedHpFrac) {
+      if (sliceWins && slice) {
+        mode = "cover" // a probe that fewer shooters can hit: slip behind the corner, turn the 2v1 into a 1v1
+        dir = slice.dir
+      } else if (roofTarget) {
+        S.climb.start(roofTarget, t)
+        const c = climbStep(S.climb, world, sn)
+        if (c) {
+          this.lastMode = "climb"
+          return c
+        }
+        mode = "retreat"
+        dir = norm(add(perp, towardThreat, L.retreatBlend))
+      } else if (sn.losCount >= 2 || hpFrac < L.woundedHpFrac) {
         mode = "retreat"
         dir = norm(add(perp, towardThreat, L.retreatBlend))
       } else if (close) {
@@ -170,12 +215,29 @@ export class EvasiveLocomotion implements Locomotion {
     }
 
     // keep evasive / loot / patrol moves inside the safe rim (the zone modes already point inward)
-    const rimChecked: readonly Mode[] = ["retreat", "backpedal", "approach", "strafe", "loot", "patrol", "laserDodge"]
+    const rimChecked: readonly Mode[] = ["cover", "retreat", "backpedal", "approach", "strafe", "loot", "patrol", "laserDodge"]
     if (dir && rimChecked.includes(mode)) {
       const m = Math.hypot(dir[0], dir[1])
       if (!inSafe(px + (dir[0] / m) * L.rimLookaheadM, py + (dir[1] / m) * L.rimLookaheadM)) {
         const inward = toward(cur.center[0], cur.center[1])
         if (inward) dir = norm(add(dir, inward, 1)) ?? inward
+      }
+    }
+
+    // v4 ledge clear: the heading runs into a step we can jump-jet over (open sky, headroom on top)
+    if (dir && map && mode !== "mortar" && mode !== "laserDodge" && self.grounded && energy >= L.ledgeMinEnergy && !ourLaserCharging) {
+      const m = Math.hypot(dir[0], dir[1])
+      const u: Vec2 = [dir[0] / m, dir[1] / m]
+      if (blockedAhead(map, world, u)) {
+        const ledge = findLedge(map, world, u)
+        if (ledge && (zoneForced || inSafe(ledge.x, ledge.y))) {
+          S.climb.start(ledge, t)
+          const c = climbStep(S.climb, world, sn)
+          if (c) {
+            this.lastMode = "climb"
+            return c
+          }
+        }
       }
     }
 
@@ -185,6 +247,15 @@ export class EvasiveLocomotion implements Locomotion {
       boost = S.isBoosting
     } else {
       S.isBoosting = false
+    }
+    // v4 slice boost latch: snap behind the corner
+    if (mode === "cover" && dir && !ourLaserCharging) {
+      S.sliceBoosting = energy >= (S.sliceBoosting ? L.sliceBoostHoldEnergy : L.sliceBoostStartEnergy)
+      boost = S.sliceBoosting
+      S.sliceHeading = [dir[0], dir[1]]
+      S.sliceT = t
+    } else {
+      S.sliceBoosting = false
     }
 
     // anti-lead hop
@@ -197,7 +268,7 @@ export class EvasiveLocomotion implements Locomotion {
     this.lastMode = mode
     if (!dir) return { move: [0, 0], boost: false, jump }
     const mag = clamp(Math.hypot(dir[0], dir[1]), 0, 1)
-    const steered = steer(map, world, S, [dir[0] / mag, dir[1] / mag])
+    const steered = steer(map, world, S, [dir[0] / mag, dir[1] / mag], avoidDrop && mode !== "outside" && mode !== "shrink")
     if (!steered) return { move: [0, 0], boost: false, jump }
     return { move: [steered[0] * mag, steered[1] * mag], boost, jump }
   }
