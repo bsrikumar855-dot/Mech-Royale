@@ -8,7 +8,8 @@ export const ECONOMY = {
    * HP and +4% damage up to 10 cubes regardless of which upgrade is picked, so the upgrade choice is only a
    * multiplier on top of identical passive growth either way. Submission 26: lightning_* (instant, 45 m cone) joins
    * the same snowball ahead of armor/plating too -- checking whether this keeps compounding or plateaus. Then
-   * regen/mobility, as before. Offers only contain weapon upgrades for weapons we hold, so laser_* and lightning_*
+   * regen/mobility, as before. Submission 31 (one variable): gun_mag moves from rank 12 to rank 3 (right after
+   * gun_damage): level 1 lifts sustained shots/s +31% (gun_damage +15%, gun_rate +8%); it displaces some laser picks. Offers only contain weapon upgrades for weapons we hold, so laser_* and lightning_*
    * appear once we carry one. ALL 22 ids of hello.config.upgrades are ranked (a test enforces it). An id not listed
    * here (a balance change adds one) ranks after every listed id instead of silently winning, and ties keep the
    * server's choice order.
@@ -16,6 +17,7 @@ export const ECONOMY = {
   upgradePriority: [
     "gun_rate",
     "gun_damage",
+    "gun_mag", // +8 rounds, -20% reload: the 2.4 s reload is ~45% of a 12-round cycle (submission 31)
     "laser_damage",
     "laser_charge",
     "lightning_efficiency",
@@ -25,7 +27,6 @@ export const ECONOMY = {
     "plating", // +15% max HP
     "nanites", // faster out-of-combat regen
     "servos", // +8% speed
-    "gun_mag",
     "reactor", // +30% energy regen (boost)
     "capacitor", // +30 max energy
     "gyros", // turn rate: the slew gate depends on it
