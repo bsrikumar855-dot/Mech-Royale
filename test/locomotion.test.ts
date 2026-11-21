@@ -5,6 +5,7 @@ import { LOCOMOTION as L } from "../src/config/index.ts"
 import { EvasiveLocomotion } from "../src/locomotion/index.ts"
 import { LocoState } from "../src/locomotion/state.ts"
 import { blockedAhead, steer } from "../src/locomotion/steer.ts"
+import { sliceCover } from "../src/locomotion/cover.ts"
 import { NO_DEADLINE } from "../src/runtime/deadline.ts"
 import type { Observation, WeaponObs } from "../src/types/mechfight.ts"
 import type { MapQuery } from "../src/world/map.ts"
@@ -391,18 +392,50 @@ describe("v5: crate and drone hunting (snowball gate)", () => {
     assert.equal(r.mode, "hunt")
     assert.ok(r.out.move[0] > 0.99, `toward the crate: ${r.out.move}`)
   })
-  test("...and holds at <= 38 m (muzzle to centre) so Combat breaks it; keeps walking at 40 m", () => {
-    const hold = once((o) => { fresh(o); o.crates = [crate(37)] })
-    assert.equal(hold.mode, "hunt")
-    assert.deepEqual(hold.out.move, [0, 0], "in position: stand still while Combat shoots")
+  test("...and once in position (<= 38 m + shot line) circle-strafes it at full speed; at 40 m keeps walking in", () => {
+    const orbit = once((o) => { fresh(o); o.crates = [crate(32)] })
+    assert.equal(orbit.mode, "farm")
+    assert.ok(mag(orbit.out.move) > 0.9, `moving, not a stationary target: ${orbit.out.move}`)
+    assert.ok(Math.abs(dot(orbit.out.move, [1, 0])) < 0.05, `perpendicular to the crate inside the 28-36 m band: ${orbit.out.move}`)
+    const outer = once((o) => { fresh(o); o.crates = [crate(37)] })
+    assert.equal(outer.mode, "farm")
+    assert.ok(dot(outer.out.move, [1, 0]) > 0.3 && mag(outer.out.move) > 0.9, `37 m: orbit bent back inward: ${outer.out.move}`)
     assert.ok(once((o) => { fresh(o); o.crates = [crate(40)] }).out.move[0] > 0.99)
   })
-  test("walks toward an NPC drone 65 m away and holds at <= 35 m; keeps walking at 37 m", () => {
+  test("walks toward an NPC drone 65 m away, then circle-strafes it at 32 m; keeps walking at 37 m", () => {
     const go = once((o) => { fresh(o); o.mechs = [drone(0, 65)] })
     assert.equal(go.mode, "hunt")
     assert.ok(go.out.move[1] > 0.99, `toward the drone: ${go.out.move}`)
-    assert.deepEqual(once((o) => { fresh(o); o.mechs = [drone(0, 34)] }).out.move, [0, 0])
+    const orbit = once((o) => { fresh(o); o.mechs = [drone(0, 32)] })
+    assert.equal(orbit.mode, "farm")
+    assert.ok(mag(orbit.out.move) > 0.9 && Math.abs(orbit.out.move[1]) < 0.05, `perpendicular: ${orbit.out.move}`)
+    const close = once((o) => { fresh(o); o.mechs = [drone(0, 20)] })
+    assert.ok(close.out.move[1] < -0.3, `inside 28 m: orbit bent outward: ${close.out.move}`)
     assert.ok(once((o) => { fresh(o); o.mechs = [drone(0, 37)] }).out.move[1] > 0.99)
+  })
+  // orbit side +1 = the tangent 90 deg counter-clockwise from "toward the target"
+  test("farm orbit flips side at a wall (synthetic building A's west face)", () => {
+    // drone due south, 30 m: side +1 heads east, straight into A's west wall at x = 0, 3 m away
+    const r = new Runner(syntheticMap()).step((o) => { fresh(o); o.self.pos = [-3, 5, -0.3]; o.mechs = [{ ...drone(-3, -25), pos: [-3, -25, -0.3] }] })
+    assert.equal(r.mode, "farm")
+    assert.ok(r.out.move[0] < -0.9, `west, away from the wall: ${r.out.move}`)
+  })
+  test("farm orbit flips side where the shot line would be lost behind a building", () => {
+    // found by search: from (-2, -5) the +1 side (NNW) puts building A between us and a drone at (30, 5); -1 keeps the line
+    const r = new Runner(syntheticMap()).step((o) => { fresh(o); o.self.pos = [-2, -5, -0.2]; o.mechs = [{ ...drone(30, 5), pos: [30, 5, 3] }] })
+    assert.equal(r.mode, "farm")
+    assert.ok(r.out.move[1] < -0.8, `the -1 side (south-south-east): ${r.out.move}`)
+  })
+  test("farm orbit flips side at the safe rim", () => {
+    // safe radius 102 around (0, -100); we stand 99 m out with the drone due east: side +1 (north) would leave the rim
+    const r = once((o) => {
+      fresh(o)
+      o.zone = { center: [0, -100], radius: 120, next_center: [0, -100], next_radius: 120, shrink_start: 1e6, shrink_end: 1e6 + 1, dps: 20 }
+      o.self.pos = [0, -1, 0]
+      o.mechs = [drone(30, -6)] // the drone itself must be inside the safe rim to be a target
+    })
+    assert.equal(r.mode, "farm")
+    assert.ok(r.out.move[1] < -0.9, `south, inside the rim: ${r.out.move}`)
   })
   test("stand-offs sit inside Combat's own engagement gates (drone 40 m, crate 45 m)", async () => {
     const { COMBAT } = await import("../src/config/index.ts")
@@ -486,5 +519,95 @@ describe("v5: snowball upgrade order", () => {
     const p = ECONOMY.upgradePriority
     assert.deepEqual([...p.slice(0, 7)].sort(), ["armor", "gun_damage", "gun_rate", "laser_charge", "laser_damage", "nanites", "plating"])
     assert.deepEqual([...p.slice(-3)].sort(), ["mortar_reload", "mortar_splash", "mortar_velocity"])
+  })
+})
+
+// ------------------------------------------------------------------ v6: ground-only 2v1+ corner slicing
+describe("v6: ground 2v1 corner slicing (>= 2 shot lines only)", { skip: !HAS_ARENA && "arena not found" }, () => {
+  // real arena, found by search: open ground beside a building, two shooters 70 m out, 63 deg apart
+  const P: [number, number, number] = [-60.35, 134.81, -0.99]
+  const E1: [number, number, number] = [-62.17, 204.79, -1.76]
+  const E2: [number, number, number] = [-123.54, 164.93, -5.13]
+  const map = HAS_ARENA ? realMap().map : (null as unknown as MapQuery)
+  const zone = (o: Observation): void => {
+    o.zone = { center: [P[0], P[1]], radius: 500, next_center: [P[0], P[1]], next_radius: 500, shrink_start: 1e6, shrink_end: 1e6 + 1, dps: 20 }
+  }
+  const at = (mechs: ReturnType<typeof enemy>[], over: (o: Observation) => void = () => {}, r = new Runner(map)) =>
+    r.step((o) => { o.self.pos = [...P]; zone(o); o.mechs = mechs; over(o) })
+  const worldAt = (mechs: ReturnType<typeof enemy>[]): WorldModel => {
+    const w = new WorldModel(hello)
+    w.update(scene((o) => { o.self.pos = [...P]; zone(o); o.mechs = mechs }))
+    return w
+  }
+
+  test("2 shooters: picks the probe that drops exposure 2 -> 0/1 and boosts around the corner", () => {
+    const r = at([enemy(5, E1), enemy(6, E2)])
+    assert.equal(r.sense.losCount, 2, "precondition")
+    assert.equal(r.mode, "cover")
+    assert.equal(r.out.boost, true)
+    const pick = sliceCover(map, worldAt([enemy(5, E1), enemy(6, E2)]), r.sense, { inSafe: () => true, prevHeading: null })!
+    assert.equal(pick.current, 2)
+    assert.ok(pick.exposed <= 1, `exposed ${pick.exposed}`)
+    assert.ok(dot(r.out.move, pick.dir) > 0.9, `toward the probe: ${r.out.move} vs ${pick.dir}`)
+  })
+  test("boost latch: starts at >= 28 energy, holds down to 14, then stops", () => {
+    const r = new Runner(map)
+    const s = (energy: number) => at([enemy(5, E1), enemy(6, E2)], (o) => (o.self.energy = energy), r)
+    assert.equal(s(27).out.boost, false, "27: no start")
+    assert.equal(s(28).out.boost, true)
+    assert.equal(s(15).out.boost, true, "latched")
+    assert.equal(s(13).out.boost, false, "below 14: released")
+  })
+  test("1v1 NEVER slices, even at 30% HP with a fully hidden probe 12 m away: keeps the 6afa909 kiting", () => {
+    const solo = [enemy(6, E2)]
+    const r = at(solo, (o) => (o.self.hp = 0.3 * o.self.max_hp))
+    assert.equal(r.sense.losCount, 1)
+    assert.equal(sliceCover(map, worldAt(solo), r.sense, { inSafe: () => true, prevHeading: null })!.exposed, 0, "precondition: cover exists")
+    assert.notEqual(r.mode, "cover")
+    assert.equal(r.mode, "retreat", "the existing wounded 1v1 strafe-retreat")
+    assert.equal(at(solo).mode, "strafe", "healthy 1v1: plain strafe")
+  })
+  test("probes outside the safe zone are never picked", () => {
+    const r = at([enemy(5, E1), enemy(6, E2)])
+    const w = worldAt([enemy(5, E1), enemy(6, E2)])
+    const best = sliceCover(map, w, r.sense, { inSafe: () => true, prevHeading: null })!
+    const unsafe = (x: number, y: number): boolean => Math.hypot(x - best.x, y - best.y) < 1
+    const alt = sliceCover(map, w, r.sense, { inSafe: (x, y) => !unsafe(x, y), prevHeading: null })
+    assert.ok(!alt || !unsafe(alt.x, alt.y), "the excluded probe is not returned")
+  })
+  test("no probe lowers exposure: falls back to the 2v1 retreat + strafe", () => {
+    // ring the scene with shooters on every side (at most 3 are checked): nothing hides from all of the nearest
+    const ring = [0, 2.1, 4.2].map((a, k) => enemy(5 + k, [P[0] + 30 * Math.cos(a), P[1] + 30 * Math.sin(a), map.heightAt(P[0] + 30 * Math.cos(a), P[1] + 30 * Math.sin(a))]))
+    const r = at(ring)
+    if (r.sense.losCount >= 2) {
+      const pick = sliceCover(map, worldAt(ring), r.sense, { inSafe: () => true, prevHeading: null })
+      if (!pick || pick.exposed >= pick.current) assert.equal(r.mode, "retreat")
+      else assert.equal(r.mode, "cover")
+    }
+  })
+})
+
+describe("v6: farm wall flip and slice fallback (synthetic map)", () => {
+  test("farm orbit flips at the map edge (blocks walking, not the shot line)", () => {
+    // drone due north 30 m: side +1 heads west into the x = -50 map edge 3 m away
+    const map = syntheticMap()
+    const drone = { id: 101, kind: "npc" as const, pos: [-47, 30, -4.7] as [number, number, number], vel: [0, 0, 0] as [number, number, number], aim: [0, 0] as [number, number], hp: 350, max_hp: 350 }
+    const r = new Runner(map).step((o) => { o.self.cubes = 0; o.self.pos = [-47, 0, -4.7]; o.mechs = [drone] })
+    assert.equal(r.mode, "farm")
+    assert.ok(map.hasShotLOS([-51, 0, 2.3], [-47, 30, -2.95]), "precondition: the probe beyond the edge still sees the drone")
+    assert.ok(r.out.move[0] > 0.9, `east, away from the edge: ${r.out.move}`)
+  })
+  test("2 shooters on open ground and no probe hides from either: no slice, the existing 2v1 retreat", () => {
+    const map = syntheticMap()
+    const P: [number, number, number] = [-40, 35, -4]
+    const foes = [enemy(5, [-10, 45, -1]), enemy(6, [-45, 0, -4.5])]
+    const r = new Runner(map).step((o) => { o.self.pos = [...P]; o.mechs = foes })
+    assert.equal(r.sense.losCount, 2, "precondition")
+    const w = new WorldModel(hello)
+    w.update(scene((o) => { o.self.pos = [...P]; o.mechs = foes }))
+    const pick = sliceCover(map, w, r.sense, { inSafe: () => true, prevHeading: null })
+    assert.ok(pick && pick.exposed === 2, `precondition: every probe stays exposed to both (${pick?.exposed})`)
+    assert.equal(r.mode, "retreat")
+    assert.equal(r.out.boost, true, "the existing retreat boost latch")
   })
 })
