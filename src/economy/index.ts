@@ -4,10 +4,13 @@
  *
  * Rules (survival first: placement counts, kills do not):
  *  - pick: whenever an offer is pending, choose the best-ranked choice by ECONOMY.upgradePriority.
- *  - take: laser or lightning (laser preferred) into an EMPTY slot, within loot.pickup_radius (horizontal) and 4 m
- *    (vertical). Mortar is skipped on purpose (laser cook-off exposure, no ballistics yet).
- *  - swap: holding lightning, a laser in reach and no enemy mech within swapNoEnemyM -> take the laser, drop the
- *    lightning's slot. (The Arbiter independently refuses any drop of a slot whose laser is charging.)
+ *  - take: laser, lightning or mortar (in that preference order) into an EMPTY slot, within loot.pickup_radius
+ *    (horizontal) and 4 m (vertical).
+ *  - swap (v3, submission 29): both slots full, a pickup we do not hold and no enemy mech within swapNoEnemyM ->
+ *    trade out whichever held non-gun weapon ranks WORST in takeKinds, as long as the pickup ranks strictly
+ *    better. Generalizes the old lightning-for-laser-only rule: previously a held mortar had no swap path at all
+ *    (it could only sit in the slot forever once taken), which v2 (submission 22) found was a likely real cost.
+ *    (The Arbiter independently refuses any drop of a slot whose laser is charging.)
  *  - lootTargets: visible cubes, pickups we would take or swap to, and uncontested supply drops landing within
  *    10 s and 45 m; value falls with distance.
  */
@@ -38,18 +41,37 @@ export function wantsPickup(self: SelfObs, p: PickupObs): boolean {
   return ECONOMY.takeKinds.includes(p.kind) && hasEmptySlot(self) && !heldKinds(self).includes(p.kind)
 }
 
-/** Would we swap our lightning for this pickup? (a laser, both slots full, holding lightning, no laser yet) */
-export function wantsSwap(self: SelfObs, p: PickupObs): boolean {
-  const held = heldKinds(self)
-  return p.kind === "laser" && !hasEmptySlot(self) && held.includes("lightning") && !held.includes("laser")
-}
-
-const horiz = (ax: number, ay: number, bx: number, by: number): number => Math.hypot(bx - ax, by - ay)
-const valueAt = (base: number, dist: number): number => base / (1 + dist / ECONOMY.halfValueDistanceM)
 const preference = (kind: string): number => {
   const i = ECONOMY.takeKinds.indexOf(kind)
   return i === -1 ? Infinity : i
 }
+
+/** The non-gun weapon we hold with the worst (highest) takeKinds preference rank, and its slot, if any. */
+function worstHeldSwappable(self: SelfObs): { slot: 0 | 1; pref: number } | null {
+  let worst: { slot: 0 | 1; pref: number } | null = null
+  self.weapons.forEach((w, i) => {
+    if (!w || w.kind === "gun") return
+    const pref = preference(w.kind)
+    if (!worst || pref > worst.pref) worst = { slot: i as 0 | 1, pref }
+  })
+  return worst
+}
+
+/**
+ * Would we swap a held weapon for this pickup, and which slot? Both slots full, a kind we do not already hold,
+ * strictly better ranked (in takeKinds) than the worst non-gun weapon we currently carry. Null if no swap applies.
+ */
+export function wantsSwap(self: SelfObs, p: PickupObs): { slot: 0 | 1 } | null {
+  if (hasEmptySlot(self) || heldKinds(self).includes(p.kind)) return null
+  const pPref = preference(p.kind)
+  if (pPref === Infinity) return null
+  const worst = worstHeldSwappable(self)
+  if (!worst || pPref >= worst.pref) return null
+  return { slot: worst.slot }
+}
+
+const horiz = (ax: number, ay: number, bx: number, by: number): number => Math.hypot(bx - ax, by - ay)
+const valueAt = (base: number, dist: number): number => base / (1 + dist / ECONOMY.halfValueDistanceM)
 
 export class RuleEconomy implements Economy {
   decide(ctx: TickContext): EconomyOutput {
@@ -79,10 +101,7 @@ export class RuleEconomy implements Economy {
       const pref = preference(p.kind)
       if (!take || pref < take.pref || (pref === take.pref && d < take.d)) {
         take = { id: p.id, pref, d }
-        if (swap) {
-          const slot = self.weapons.findIndex((w) => w?.kind === "lightning")
-          if (slot === 0 || slot === 1) take.drop = slot
-        }
+        if (swap) take.drop = swap.slot
       }
     }
     if (take) {
