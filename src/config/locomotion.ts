@@ -119,13 +119,9 @@ export const LOCOMOTION = {
   /** While the gate is open the free-loot reach grows to these ranges. */
   huntLaserRangeM: 90,
   huntDropRangeM: 140, // submission 20: widened again from 105 (submission 19 was 75), same reasoning as dropRangeM above
-  /** Submission 23: widened (65 -> 90, 75 -> 100), same reasoning and direction as the supply-drop rush
-   * (submissions 19-20, confirmed +0.02 twice before overshooting): early cubes compound (every upgrade threshold
-   * hits sooner), so reaching farther for them while the hunt gate is open (no tracked enemy within huntEnemyClearM)
-   * is worth it. huntEnemyClearM itself is untouched: this only widens how far we'll walk once already judged safe. */
-  huntCubeRangeM: 90,
+  huntCubeRangeM: 65,
   /** Drones (2 cubes) and crates (1 cube + weapon chance) are hunted up to this far... */
-  huntTargetRangeM: 100,
+  huntTargetRangeM: 75,
   /** ...only this healthy. v14: 0.85 for both (was 0.55 / 0.65): shooting a drone or crate resets the 5 s regen
    * timer (regen needs 5 s without dealing OR taking damage, then 45 HP/s), so heal first, farm after... */
   huntNpcMinHpFrac: 0.85,

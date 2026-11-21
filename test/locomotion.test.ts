@@ -248,11 +248,11 @@ describe("active loot and supply drops", () => {
     assert.notEqual(r.mode, "loot", "85 m: beyond the closed-gate 80 m")
     assert.equal(at(75).mode, "loot")
   })
-  test("lightning up to 55 m only with an empty slot and no laser; cubes up to 90 m pre-snowball (55 m once snowballed)", () => {
+  test("lightning up to 55 m only with an empty slot and no laser; cubes up to 65 m (55 m once snowballed)", () => {
     assert.equal(once((o) => (o.pickups = [pick("lightning", 50)])).mode, "loot")
     assert.notEqual(once((o) => { o.self.weapons = [o.self.weapons[0] ?? null, laser()]; o.pickups = [pick("lightning", 50)] }).mode, "loot")
-    assert.equal(once((o) => (o.cubes = [{ id: 5001, pos: [85, 0, 0] }])).mode, "loot", "submission 23: widened from 65 m")
-    assert.notEqual(once((o) => (o.cubes = [{ id: 5001, pos: [95, 0, 0] }])).mode, "loot")
+    assert.equal(once((o) => (o.cubes = [{ id: 5001, pos: [60, 0, 0] }])).mode, "loot")
+    assert.notEqual(once((o) => (o.cubes = [{ id: 5001, pos: [68, 0, 0] }])).mode, "loot")
     assert.equal(once((o) => { snowballed(o); o.cubes = [{ id: 5001, pos: [50, 0, 0] }] }).mode, "loot")
     assert.notEqual(once((o) => { snowballed(o); o.cubes = [{ id: 5001, pos: [60, 0, 0] }] }).mode, "loot")
   })
@@ -399,12 +399,6 @@ describe("v5: crate and drone hunting (snowball gate)", () => {
     const r = once((o) => { fresh(o); o.crates = [crate(65)] })
     assert.equal(r.mode, "hunt")
     assert.ok(r.out.move[0] > 0.99, `toward the crate: ${r.out.move}`)
-  })
-  test("submission 23: crates and drones are now hunted out to 100 m, not just 75 m", () => {
-    assert.equal(once((o) => { fresh(o); o.crates = [crate(95)] }).mode, "hunt")
-    assert.notEqual(once((o) => { fresh(o); o.crates = [crate(105)] }).mode, "hunt")
-    assert.equal(once((o) => { fresh(o); o.mechs = [drone(0, 95)] }).mode, "hunt")
-    assert.notEqual(once((o) => { fresh(o); o.mechs = [drone(0, 105)] }).mode, "hunt")
   })
   test("...and holds at <= 38 m (muzzle to centre) so Combat breaks it; keeps walking at 40 m", () => {
     const hold = once((o) => { fresh(o); o.crates = [crate(37)] })
