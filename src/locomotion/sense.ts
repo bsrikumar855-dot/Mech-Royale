@@ -135,24 +135,30 @@ export function sense(world: WorldModel, map: MapQuery | null, ourRadius: number
   const el = Math.hypot(ex, ey)
   const mortarEscape: Vec2 | null = inSplash ? (el > 1e-9 ? [ex / el, ey / el] : [1, 0]) : null
 
-  // bullets: does the next-0.45 s ray pass within our radius + clearance?
+  // bullets: closest approach over the next 0.45 s between the bullet's ray and OUR OWN predicted path
+  // (continuing our current velocity), not just our current static position -- a static check credits the
+  // bullet with motion-prediction (via p.vel) while assuming we stand still, which is the wrong comparison
+  // whenever we're already moving fast enough to carry ourselves out of the way on our own.
   let bulletEscape: Vec2 | null = null
   let bestMiss = Infinity
+  const [ovx, ovy] = self.vel
   for (const p of obs.projectiles ?? []) {
     if (p.kind !== "gun" && p.kind !== "npc") continue
-    const bx = p.vel[0] * L.bulletHorizonS
-    const by = p.vel[1] * L.bulletHorizonS
-    const len2 = bx * bx + by * by
-    const u = len2 < 1e-12 ? 0 : Math.max(0, Math.min(1, ((px - p.pos[0]) * bx + (py - p.pos[1]) * by) / len2))
-    const cx = p.pos[0] + bx * u
-    const cy = p.pos[1] + by * u
-    const miss = dist2d(px, py, cx, cy)
+    const rx = px - p.pos[0]
+    const ry = py - p.pos[1]
+    const rvx = ovx - p.vel[0]
+    const rvy = ovy - p.vel[1]
+    const len2 = rvx * rvx + rvy * rvy
+    const tStar = len2 < 1e-12 ? 0 : Math.max(0, Math.min(L.bulletHorizonS, -(rx * rvx + ry * rvy) / len2))
+    const mx = rx + rvx * tStar
+    const my = ry + rvy * tStar
+    const miss = Math.hypot(mx, my)
     if (miss <= ourRadius + L.bulletClearanceExtraM && miss < bestMiss) {
       bestMiss = miss
-      if (miss > 1e-6) bulletEscape = [(px - cx) / miss, (py - cy) / miss]
+      if (miss > 1e-6) bulletEscape = [mx / miss, my / miss]
       else {
-        const l = Math.hypot(bx, by) || 1
-        bulletEscape = [-by / l, bx / l] // dead centre: either side, pick the left of the bullet
+        const l = Math.hypot(p.vel[0], p.vel[1]) || 1
+        bulletEscape = [-p.vel[1] / l, p.vel[0] / l] // dead centre: either side, pick the left of the bullet
       }
     }
   }
