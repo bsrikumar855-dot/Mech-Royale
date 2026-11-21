@@ -29,8 +29,6 @@ export const COMBAT = {
   // ---- kill-confirm focus (cost = HP left * (1 + dist / killDistScaleM) * product of (1 - bonus); lower wins)
   /** Time-to-kill dominates: HP left first, distance second. Unknown HP counts as full mech HP. */
   killDistScaleM: 100,
-  /** An enemy at or below this HP is finishable (a laser release or a short gun burst). */
-  killableHp: 350,
   /** We hold a laser and it carries a mortar: laser cook-off (+60%). */
   cookoffTargetBonus: 0.3,
   closeThreatM: 50,
@@ -39,10 +37,13 @@ export const COMBAT = {
   /** We would hit its rear arc (x rear_mult). */
   rearArcBonus: 0.1,
 
-  // ---- regen hold-fire discipline (dealing damage resets the 5 s out-of-combat regen timer). Strict: never in a 1v1 brawl.
-  regenHoldHpFrac: 0.35,
-  /** Hold fire only on targets farther than this that we cannot finish (hp > killableHp). */
-  regenHoldDistM: 75,
+  // ---- v13a sticky focus fire (practice is a squad hunt: deleting one hunter fast is placement + halves incoming DPS)
+  /** The last mech target's cost is multiplied by (1 - this) while it is still a valid target... */
+  stickyFocusBonus: 0.4,
+  /** ...remembered this long after it was last targeted... */
+  stickyMemoryS: 2,
+  /** ...unless ANOTHER shot-line enemy is critically low (below this HP): then the plain kill-confirm cost decides. */
+  stickySwitchHp: 250,
 
   // ---- laser: hold to charge, release to fire (hitscan: no lead)
   /** Release once charged to this fraction of the full charge time (stats.charge): ~0.70 s of 0.75 s... */
