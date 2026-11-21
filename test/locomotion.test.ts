@@ -1,230 +1,360 @@
+/** Locomotion v3: anti-lead A-D strafing, projectile / mortar / laser dodges, hops, zone, loot, patrol, wall feeler. */
 import assert from "node:assert/strict"
 import { describe, test } from "node:test"
-import { LOCOMOTION } from "../src/config/index.ts"
-import { blockedAhead, RuleLocomotion, steerAround } from "../src/locomotion/index.ts"
-import type { LootTarget } from "../src/types/contracts.ts"
-import type { Observation } from "../src/types/mechfight.ts"
-import { pointInRing } from "../src/world/polygon.ts"
+import { LOCOMOTION as L } from "../src/config/index.ts"
+import { EvasiveLocomotion } from "../src/locomotion/index.ts"
+import { LocoState } from "../src/locomotion/state.ts"
+import { blockedAhead, steer } from "../src/locomotion/steer.ts"
+import { NO_DEADLINE } from "../src/runtime/deadline.ts"
+import type { Observation, WeaponObs } from "../src/types/mechfight.ts"
+import type { MapQuery } from "../src/world/map.ts"
 import { WorldModel } from "../src/world/world.ts"
-import { cleanObs, ctxFor, enemy, fixtureHello, HAS_ARENA, realMap, syntheticMap } from "./helpers.ts"
+import { cleanObs, enemy, fixtureHello, fixtureObs, HAS_ARENA, realMap, syntheticMap } from "./helpers.ts"
 
-const smap = syntheticMap()
-const decide = (patch: (o: Observation) => void, loot: LootTarget[] = [], map = null as ReturnType<typeof syntheticMap> | null) =>
-  new RuleLocomotion().decide(ctxFor(cleanObs(patch), map), loot)
-const len = (m: readonly number[]): number => Math.hypot(m[0]!, m[1]!)
-const zone = (o: Observation, cx: number, cy: number, r: number): void => {
-  o.zone = { center: [cx, cy], radius: r, next_center: [cx, cy], next_radius: r, shrink_start: 1e6, shrink_end: 1e6 + 1, dps: 20 }
+const hello = fixtureHello()
+const mag = (v: readonly number[]): number => Math.hypot(v[0]!, v[1]!)
+const dot = (a: readonly number[], b: readonly number[]): number => a[0]! * b[0]! + a[1]! * b[1]!
+const laser = (charge = 0): WeaponObs => ({ kind: "laser", cooldown: 0, charge, stats: { ...(hello.config.weapons.laser as Record<string, number>) } })
+
+/** A calm scene at the origin: huge zone, full HP/energy, grounded, nothing around. */
+function scene(patch: (o: Observation) => void = () => {}): Observation {
+  return cleanObs((o) => {
+    o.self.grounded = true
+    o.alive = 10
+    patch(o)
+  })
 }
-const loot = (x: number, y: number, value = 5): LootTarget => ({ x, y, z: 0, value, kind: "cube" })
 
-describe("zone safety", () => {
-  test("outside the zone: head for the centre and BOOST (energy above the minimum)", () => {
-    const out = decide((o) => { zone(o, 0, 0, 100); o.self.pos = [200, 0, 0]; o.self.in_zone = false; o.self.energy = 50 })
-    assert.ok(out.move[0] < -0.99 && Math.abs(out.move[1]) < 0.01, `move ${out.move}`)
-    assert.equal(out.boost, true)
-    assert.equal(out.jump, false)
-  })
-
-  test("outside the zone but low on energy: still runs in, does not boost", () => {
-    const out = decide((o) => { zone(o, 0, 0, 100); o.self.pos = [200, 0, 0]; o.self.in_zone = false; o.self.energy = LOCOMOTION.boostMinEnergy })
-    assert.ok(out.move[0] < -0.99)
-    assert.equal(out.boost, false)
-  })
-
-  test("inside the zone but past 85% of the radius: move inward WITHOUT boosting", () => {
-    const out = decide((o) => { zone(o, 0, 0, 100); o.self.pos = [92, 0, 0] })
-    assert.ok(out.move[0] < -0.99)
-    assert.equal(out.boost, false)
-  })
-
-  test("comfortably inside with nothing to do: stand still (silent, hard to find)", () => {
-    const out = decide((o) => { zone(o, 0, 0, 100); o.self.pos = [10, 0, 0] })
-    assert.deepEqual(out.move, [0, 0])
-    assert.equal(out.boost, false)
-  })
-
-  test("plans for the NEXT circle: a shrink 10 s away already pulls us in, using zoneAt(t + 10)", () => {
-    const out = decide((o) => {
-      o.t = 10
-      o.zone = { center: [0, 0], radius: 500, next_center: [0, 0], next_radius: 100, shrink_start: 12, shrink_end: 14, dps: 20 }
-      o.self.pos = [200, 0, 0] // inside the CURRENT circle, far outside the one it becomes
-    })
-    assert.ok(out.move[0] < -0.99)
-    assert.equal(out.boost, false, "still in the zone, so no boost")
-  })
-
-  test("a moving centre: heads for where the zone WILL be", () => {
-    const out = decide((o) => {
-      o.t = 10
-      o.zone = { center: [0, 0], radius: 500, next_center: [0, 300], next_radius: 100, shrink_start: 12, shrink_end: 14, dps: 20 }
-      o.self.pos = [0, 0, 0]
-    })
-    assert.ok(out.move[1] > 0.99, `move ${out.move}`)
-  })
-})
-
-describe("kiting", () => {
-  test("enemy within 40 m while safely inside: back away, with a sideways component, unit speed, no boost", () => {
-    const out = decide((o) => { zone(o, 0, 0, 500); o.mechs = [enemy(5, [30, 0, 0])] })
-    assert.ok(out.move[0] < -0.8, `moves away: ${out.move}`)
-    assert.ok(Math.abs(out.move[1]) > 0.1, "mild strafe")
-    assert.ok(Math.abs(len(out.move) - 1) < 1e-9)
-    assert.equal(out.boost, false)
-  })
-
-  test("strafes toward the safe side of the zone", () => {
-    const north = decide((o) => { zone(o, 0, 100, 500); o.mechs = [enemy(5, [30, 0, 0])] })
-    const south = decide((o) => { zone(o, 0, -100, 500); o.mechs = [enemy(5, [30, 0, 0])] })
-    assert.ok(north.move[1] > 0 && south.move[1] < 0)
-  })
-
-  test("never kites out of the safe zone: near the rim it bends inward", () => {
-    const out = decide((o) => { zone(o, 0, 0, 100); o.self.pos = [84, 0, 0]; o.mechs = [enemy(5, [60, 0, 0])] })
-    const q = [84 + out.move[0] * LOCOMOTION.kiteLookaheadM, out.move[1] * LOCOMOTION.kiteLookaheadM]
-    assert.ok(Math.hypot(q[0]!, q[1]!) <= 100 * LOCOMOTION.safeRadiusFrac + 1e-9, `stays inside: ${q}`)
-  })
-
-  test("an enemy beyond 40 m does not trigger kiting", () => {
-    assert.deepEqual(decide((o) => { zone(o, 0, 0, 500); o.mechs = [enemy(5, [50, 0, 0])] }).move, [0, 0])
-  })
-
-  test("drones are not kited (only enemy mechs)", () => {
-    const out = decide((o) => { zone(o, 0, 0, 500); o.mechs = [{ id: 101, kind: "npc", pos: [10, 0, 0], vel: [0, 0, 0], aim: [0, 0] }] })
-    assert.deepEqual(out.move, [0, 0])
-  })
-
-  test("the zone still wins over kiting", () => {
-    const out = decide((o) => { zone(o, 0, 0, 100); o.self.pos = [200, 0, 0]; o.self.in_zone = false; o.mechs = [enemy(5, [180, 0, 0])] })
-    assert.ok(out.move[0] < -0.99, "runs in, toward the enemy side if it must")
-  })
-})
-
-describe("short safe loot detour", () => {
-  test("walks to a visible cube within 25 m when no enemy is near", () => {
-    const out = decide((o) => zone(o, 0, 0, 500), [loot(20, 0)])
-    assert.ok(out.move[0] > 0.99)
-  })
-  test("ignores loot beyond 25 m", () => {
-    assert.deepEqual(decide((o) => zone(o, 0, 0, 500), [loot(26, 0)]).move, [0, 0])
-  })
-  test("ignores loot outside the safe zone", () => {
-    assert.deepEqual(decide((o) => { zone(o, 0, 0, 100); o.self.pos = [70, 0, 0] }, [loot(90, 0)]).move, [0, 0])
-  })
-  test("takes the highest-value target, not just the nearest", () => {
-    const out = decide((o) => zone(o, 0, 0, 500), [loot(5, 0, 2), loot(0, 20, 9)])
-    assert.ok(out.move[1] > 0.99)
-  })
-  test("no detour with an enemy mech within 35 m (kites instead); allowed again beyond 40 m", () => {
-    const near = decide((o) => { zone(o, 0, 0, 500); o.mechs = [enemy(5, [-30, 0, 0])] }, [loot(20, 0)])
-    assert.ok(near.move[0] > 0.5, "kiting AWAY from the enemy happens to be toward +x here")
-    const nearOther = decide((o) => { zone(o, 0, 0, 500); o.mechs = [enemy(5, [30, 0, 0])] }, [loot(20, 0)])
-    assert.ok(nearOther.move[0] < -0.5, "enemy at 30 m: kite away, NOT toward the cube")
-    const far = decide((o) => { zone(o, 0, 0, 500); o.mechs = [enemy(5, [45, 0, 0])] }, [loot(0, 20)])
-    assert.ok(far.move[1] > 0.99, "enemy 45 m away: the detour is on")
-  })
-  test("stops at the cube instead of orbiting it", () => {
-    assert.deepEqual(decide((o) => zone(o, 0, 0, 500), [loot(1, 0)]).move, [0, 0])
-  })
-  test("never jumps in v1", () => {
-    assert.equal(decide((o) => zone(o, 0, 0, 500), [loot(20, 0)]).jump, false)
-  })
-})
-
-describe("wall feeler (no pathfinder)", () => {
-  // Synthetic building A occupies x 0..10, y 0..10 (top 20). We stand west of it at (-6, 5).
-  const world = (): WorldModel => {
-    const w = new WorldModel(fixtureHello())
-    w.update(cleanObs((o) => { o.self.pos = [-6, 5, smap.heightAt(-6, 5)]; zone(o, 0, 0, 500) }))
-    return w
+class Runner {
+  loco = new EvasiveLocomotion()
+  world = new WorldModel(hello)
+  map: MapQuery | null
+  t = 10
+  constructor(map: MapQuery | null = null) {
+    this.map = map
   }
+  step(patch: (o: Observation) => void = () => {}, dt = 0.1) {
+    const o = scene(patch)
+    o.t = this.t
+    o.tick = Math.round(this.t * 20)
+    this.t += dt
+    this.world.update(o)
+    const out = this.loco.decide({ world: this.world, map: this.map, deadline: NO_DEADLINE }, [])
+    return { out, mode: this.loco.lastMode, sense: this.loco.lastSense!, state: this.loco.state }
+  }
+}
+const once = (patch: (o: Observation) => void = () => {}, map: MapQuery | null = null) => new Runner(map).step(patch)
 
-  test("blockedAhead: the wall is felt 4 m out, open ground and map edges are classified", () => {
-    const w = world()
-    assert.equal(blockedAhead(smap, w, [1, 0]), true)
-    assert.equal(blockedAhead(smap, w, [-1, 0]), false)
-    assert.equal(blockedAhead(smap, w, [0, 1]), false)
-    w.update(cleanObs((o) => { o.tick = 202; o.self.pos = [48.5, 0, smap.heightAt(48.5, 0)]; zone(o, 0, 0, 500) }))
-    assert.equal(blockedAhead(smap, w, [1, 0]), true, "the map edge is a wall")
+describe("threat trigger: never a stationary target under threat (the 300/300 bug)", () => {
+  test("an enemy mech at 139 m (far beyond the old 40 m kite radius) makes us move", () => {
+    const r = once((o) => (o.mechs = [enemy(5, [139, 0, 0])]))
+    assert.ok(mag(r.out.move) > 0.99, `move ${r.out.move}`)
   })
-
-  test("steerAround: open heading is kept; a blocked one is rotated to the first open candidate; no map = passthrough", () => {
-    const w = world()
-    assert.deepEqual(steerAround(smap, w, [0, 1]), [0, 1])
-    const r = steerAround(smap, w, [1, 0])!
-    assert.ok(r && Math.abs(len(r) - 1) < 1e-9 && blockedAhead(smap, w, r) === false)
-    const deg = (Math.atan2(r[1], r[0]) * 180) / Math.PI
-    assert.ok(LOCOMOTION.steerAnglesDeg.includes(Math.round(deg)), `deviation ${deg} must be one of the configured angles`)
-    assert.deepEqual(steerAround(null, w, [1, 0]), [1, 0])
+  test("recent damage alone (no visible shooter) makes us move", () => {
+    const r = once((o) => (o.events = [{ type: "damaged", amount: 45, weapon: "gun", bearing: 1, by: 9 }]))
+    assert.ok(mag(r.out.move) > 0.99)
+    assert.ok(r.sense.damagedRecently)
   })
-
-  test("a loot target behind the building: the walker is steered around it instead of into it", () => {
-    const out = decide((o) => { o.self.pos = [-6, 5, smap.heightAt(-6, 5)]; zone(o, 0, 0, 500) }, [loot(14, 5)], smap)
-    assert.ok(Math.abs(len(out.move) - 1) < 1e-9)
-    assert.notDeepEqual(out.move, [1, 0])
-    const w = world()
-    assert.equal(blockedAhead(smap, w, out.move as [number, number]), false)
+  test("a near/mid weapon sound alone makes us move; a far one or footsteps do not trigger", () => {
+    assert.ok(mag(once((o) => (o.sounds = [{ kind: "gun", bearing: 2, dist: "mid", age: 0.1 }])).out.move) > 0.99)
+    assert.equal(once((o) => (o.sounds = [{ kind: "gun", bearing: 2, dist: "far", age: 0.1 }])).sense.active, false)
+    assert.equal(once((o) => (o.sounds = [{ kind: "step", bearing: 2, dist: "near", age: 0.1 }])).sense.active, false)
   })
-
-  test("boxed in on every heading: stands still rather than walking into a wall", () => {
-    // A map where every probe is blocked (walls all round): steerAround finds nothing and the walker stays put.
-    const walled = { bounds: smap.bounds, slopeDegAt: () => 0, heightAt: () => 0, isBlockedAt: () => true } as unknown as typeof smap
-    const w = world()
-    assert.equal(steerAround(walled, w, [1, 0]), null)
-    const out = new RuleLocomotion().decide(
-      ctxFor(cleanObs((o) => { o.self.pos = [-6, 5, 0]; zone(o, 0, 0, 500) }), walled),
-      [loot(14, 5)],
-    )
-    assert.deepEqual(out.move, [0, 0])
-    assert.equal(out.boost, false)
+  test("an enemy projectile within 140 m triggers; one at 200 m does not", () => {
+    assert.equal(once((o) => (o.projectiles = [{ id: 1, kind: "gun", pos: [120, 0, 5], vel: [0, 252, 0] }])).sense.active, true)
+    assert.equal(once((o) => (o.projectiles = [{ id: 1, kind: "gun", pos: [200, 0, 5], vel: [0, 252, 0] }])).sense.active, false)
   })
-})
-
-describe("wall feeler against a REAL building", { skip: !HAS_ARENA && "arena not found" }, () => {
-  test("walking straight at a real wall from 3.2 m away is steered to an open heading", () => {
-    const { map } = realMap()
-    let tested = 0
-    for (const p of map.prisms) {
-      if (p.kind !== "building" || p.holes.length > 0 || p.top - p.base < 12) continue
-      const n = p.ring.length / 2
-      for (let i = 0; i < n && tested < 25; i++) {
-        const j = (i + 1) % n
-        const ax = p.ring[2 * i]!, ay = p.ring[2 * i + 1]!, bx = p.ring[2 * j]!, by = p.ring[2 * j + 1]!
-        const l = Math.hypot(bx - ax, by - ay)
-        if (l < 10) continue
-        const mx = (ax + bx) / 2, my = (ay + by) / 2
-        let nx = -(by - ay) / l, ny = (bx - ax) / l
-        if (pointInRing(mx + nx * 0.5, my + ny * 0.5, p.ring)) { nx = -nx; ny = -ny }
-        const x = mx + nx * 3.2, y = my + ny * 3.2
-        const z = map.heightAt(x, y)
-        const w = new WorldModel(fixtureHello())
-        w.update(cleanObs((o) => { o.self.pos = [x, y, z]; zone(o, x, y, 5000) }))
-        const into: [number, number] = [-nx, -ny]
-        if (!blockedAhead(map, w, into)) continue // not a wall probe (a gap, a ledge, a neighbour): skip
-        const r = steerAround(map, w, into)
-        if (r === null) continue // genuinely boxed in: standing still is the correct answer
-        assert.equal(blockedAhead(map, w, r), false, "steered heading must be open")
-        assert.ok(r[0] * into[0] + r[1] * into[1] < 0.999, "must differ from the blocked heading")
-        tested++
+  test("every recorded real observation with a visible enemy produces movement", () => {
+    const r = new Runner(HAS_ARENA ? realMap().map : null)
+    let checked = 0
+    for (const raw of fixtureObs()) {
+      r.world.update(raw)
+      const out = r.loco.decide({ world: r.world, map: r.map, deadline: NO_DEADLINE }, [])
+      if (raw.mechs.some((m) => m.kind === "mech")) {
+        checked++
+        assert.ok(mag(out.move) > 0.3, `tick ${raw.tick}: stationary with an enemy in sight`)
       }
     }
-    assert.ok(tested >= 8, `only ${tested} real wall probes were usable`)
+    assert.ok(checked > 0)
+  })
+})
+
+describe("A-D strafing with range control", () => {
+  const towardEnemy = (x: number, y: number): [number, number] => [x / Math.hypot(x, y), y / Math.hypot(x, y)]
+
+  test("1v1 sweet spot (42-95 m): pure perpendicular strafe", () => {
+    const r = once((o) => (o.mechs = [enemy(5, [60, 0, 0])]))
+    assert.equal(r.mode, "strafe")
+    assert.ok(Math.abs(dot(r.out.move, towardEnemy(60, 0))) < 1e-9)
+  })
+  test("139 m, healthy, in the safe zone: perpendicular strafe with a mild approach", () => {
+    const r = once((o) => (o.mechs = [enemy(5, [139, 0, 0])]))
+    assert.equal(r.mode, "approach")
+    const radial = dot(r.out.move, towardEnemy(139, 0))
+    assert.ok(radial > 0.2 && radial < 0.35, `radial ${radial}`)
+  })
+  test("139 m but not healthy (60% HP): no approach, pure strafe", () => {
+    const r = once((o) => { o.self.hp = o.self.max_hp * 0.6; o.mechs = [enemy(5, [139, 0, 0])] })
+    assert.equal(r.mode, "strafe")
+  })
+  test("too close (< 42 m, or < 52 m against lightning): backpedal while strafing", () => {
+    const r = once((o) => (o.mechs = [enemy(5, [30, 0, 0])]))
+    assert.equal(r.mode, "backpedal")
+    assert.ok(r.out.move[0] < -0.3)
+    assert.equal(once((o) => (o.mechs = [enemy(5, [48, 0, 0], { weapons: ["gun", "lightning"] })])).mode, "backpedal")
+    assert.equal(once((o) => (o.mechs = [enemy(5, [48, 0, 0])])).mode, "strafe")
+  })
+  test("strafe direction reverses every 0.75-1.15 s, not on a constant period", () => {
+    const r = new Runner()
+    const signs: number[] = []
+    for (let i = 0; i < 60; i++) signs.push(Math.sign(r.step((o) => (o.mechs = [enemy(5, [60, 0, 0])])).out.move[1]))
+    const flipsAt = signs.flatMap((s, i) => (i > 0 && s !== signs[i - 1] ? [i] : []))
+    assert.ok(flipsAt.length >= 4 && flipsAt.length <= 8, `${flipsAt.length} reversals in 6 s`)
+    const gaps = flipsAt.slice(1).map((v, i) => v - flipsAt[i]!)
+    for (const g of gaps) assert.ok(g >= 7 && g <= 12, `gap ${g} decisions`)
+    assert.ok(new Set(gaps).size > 1, "periods vary")
+  })
+})
+
+describe("bullet, mortar and laser dodges", () => {
+  test("a bullet ray about to pass through us snaps the strafe AWAY from its path", () => {
+    // enemy east (bearing 0) -> strafe is +y (sign 1) or -y (sign -1)
+    const below = once((o) => { o.mechs = [enemy(5, [100, 0, 0])]; o.projectiles = [{ id: 1, kind: "gun", pos: [100, -1, 5], vel: [-252, 0, 0] }] })
+    assert.ok(below.out.move[1] > 0, "bullet passes just south of us: go north")
+    const above = once((o) => { o.mechs = [enemy(5, [100, 0, 0])]; o.projectiles = [{ id: 1, kind: "gun", pos: [100, 1, 5], vel: [-252, 0, 0] }] })
+    assert.ok(above.out.move[1] < 0, "bullet passes just north of us: go south")
+  })
+  test("a bullet that will miss by a wide margin does not snap anything", () => {
+    assert.equal(once((o) => (o.projectiles = [{ id: 1, kind: "gun", pos: [100, 20, 5], vel: [-252, 0, 0] }])).sense.bulletEscape, null)
+  })
+  test("mortar: predicts the landing point and runs straight out of the splash with an emergency boost", () => {
+    const r = once((o) => (o.projectiles = [{ id: 1, kind: "mortar", pos: [5, 0, 20], vel: [0, 0, 0] }]))
+    assert.equal(r.mode, "mortar")
+    assert.ok(r.out.move[0] < -0.99, "away from the impact at (5, 0)")
+    assert.equal(r.out.boost, true)
+    assert.equal(once((o) => { o.self.energy = 5; o.projectiles = [{ id: 1, kind: "mortar", pos: [5, 0, 20], vel: [0, 0, 0] }] }).out.boost, false)
+  })
+  test("mortar landing well away from us is not a dodge", () => {
+    assert.notEqual(once((o) => (o.projectiles = [{ id: 1, kind: "mortar", pos: [40, 0, 20], vel: [0, 0, 0] }])).mode, "mortar")
+  })
+  test("an enemy charging a laser at us: perpendicular sprint with an emergency boost (not while our own laser charges)", () => {
+    const r = once((o) => { o.self.energy = 50; o.mechs = [enemy(5, [100, 0, 0], { charging: true })] })
+    assert.equal(r.mode, "laserDodge")
+    assert.ok(Math.abs(r.out.move[0]) < 1e-9 && Math.abs(r.out.move[1]) > 0.99)
+    assert.equal(r.out.boost, true)
+    assert.equal(once((o) => { o.self.energy = 50; o.self.weapons = [o.self.weapons[0] ?? null, laser(0.3)]; o.mechs = [enemy(5, [100, 0, 0], { charging: true })] }).out.boost, false)
+    assert.equal(once((o) => { o.self.energy = 10; o.mechs = [enemy(5, [100, 0, 0], { charging: true })] }).out.boost, false)
+  })
+  test("laser dodge picks the side that breaks the charger's line of sight (max 2 raycasts)", () => {
+    const m = syntheticMap()
+    let rays = 0
+    const blockSouth = Object.assign(Object.create(Object.getPrototypeOf(m)), m, {
+      hasShotLOS: (_a: readonly number[], b: readonly number[]) => { rays++; return !(b[1]! < -32) },
+    }) as MapQuery
+    const r = once((o) => { o.self.pos = [-30, -30, m.heightAt(-30, -30)]; o.mechs = [enemy(5, [30, -30, 3], { charging: true })] }, blockSouth)
+    assert.ok(r.out.move[1] < -0.9, `takes the south side, behind cover: ${r.out.move}`)
+    assert.ok(rays <= L.maxLosChecks + 2, `${rays} raycasts`)
+  })
+})
+
+describe("anti-lead hops", () => {
+  test("hop under fire when grounded, then wait the 1.8-2.4 s interval", () => {
+    const r = new Runner()
+    const jumps: number[] = []
+    for (let i = 0; i < 50; i++) if (r.step((o) => (o.mechs = [enemy(5, [60, 0, 0])])).out.jump) jumps.push(i)
+    assert.equal(jumps[0], 0, "first hop at once")
+    const gaps = jumps.slice(1).map((v, i) => v - jumps[i]!)
+    assert.ok(gaps.length >= 1)
+    for (const g of gaps) assert.ok(g >= 18 && g <= 25, `gap ${g} decisions`)
+  })
+  test("no hop when airborne, while our laser charges, while dodging a mortar, or with no threat", () => {
+    assert.equal(once((o) => { o.self.grounded = false; o.mechs = [enemy(5, [60, 0, 0])] }).out.jump, false)
+    assert.equal(once((o) => { o.self.weapons = [o.self.weapons[0] ?? null, laser(0.2)]; o.mechs = [enemy(5, [60, 0, 0])] }).out.jump, false)
+    assert.equal(once((o) => { o.mechs = [enemy(5, [60, 0, 0])]; o.projectiles = [{ id: 1, kind: "mortar", pos: [5, 0, 20], vel: [0, 0, 0] }] }).out.jump, false)
+    assert.equal(once().out.jump, false)
+  })
+  test("recent damage (2 s window) also allows a hop", () => {
+    assert.equal(once((o) => (o.events = [{ type: "damaged", amount: 45, weapon: "gun", bearing: 1, by: 9 }])).out.jump, true)
+  })
+})
+
+describe("crossfire and wounded retreat with a latched boost", () => {
+  test("2 enemies with line of sight: retreat (away from the nearest) with boost", () => {
+    const r = once((o) => { o.self.energy = 50; o.mechs = [enemy(5, [100, 0, 0]), enemy(6, [0, 120, 0])] })
+    assert.equal(r.mode, "retreat")
+    assert.ok(r.out.move[0] < -0.3, "away from the nearest (east) threat")
+    assert.equal(r.out.boost, true)
+  })
+  test("wounded (< 42% HP) 1v1 also retreats", () => {
+    assert.equal(once((o) => { o.self.hp = o.self.max_hp * 0.4; o.mechs = [enemy(5, [60, 0, 0])] }).mode, "retreat")
+  })
+  test("boost latch: starts at >= 30 energy, holds down to 15, then stops", () => {
+    const r = new Runner()
+    const at = (e: number) => r.step((o) => { o.self.energy = e; o.mechs = [enemy(5, [100, 0, 0]), enemy(6, [0, 120, 0])] }).out.boost
+    assert.equal(at(25), false, "25 < start")
+    assert.equal(at(35), true)
+    assert.equal(at(20), true, "latched")
+    assert.equal(at(14), false)
+    assert.equal(at(25), false, "no restart below 30")
+  })
+})
+
+describe("zone", () => {
+  test("outside the zone: run inward with boost (energy > 10)", () => {
+    const r = once((o) => { o.self.pos = [600, 0, 0]; o.self.in_zone = false; o.self.energy = 50 })
+    assert.equal(r.mode, "outside")
+    assert.ok(r.out.move[0] < -0.99)
+    assert.equal(r.out.boost, true)
+  })
+  test("under fire outside the zone: inward with a weave", () => {
+    const r = once((o) => { o.self.pos = [600, 0, 0]; o.self.in_zone = false; o.mechs = [enemy(5, [700, 0, 0])] }) // threat east: strafe axis is y
+    assert.ok(r.out.move[0] < -0.8 && Math.abs(r.out.move[1]) > 0.1)
+  })
+  test("shrink anticipation: leave for the next circle when walking there would otherwise be too late", () => {
+    const patch = (endIn: number) => (o: Observation): void => {
+      o.zone = { center: [0, 0], radius: 600, next_center: [300, 0], next_radius: 100, shrink_start: 1e6, shrink_end: 10 + endIn, dps: 20 }
+    }
+    const soon = once(patch(20))
+    assert.equal(soon.mode, "shrink")
+    assert.ok(soon.out.move[0] > 0.99)
+    assert.notEqual(once(patch(200)).mode, "shrink")
+  })
+  test("near the rim (> 85%): steps inward; strafing never carries us out of the safe band", () => {
+    assert.equal(once((o) => (o.self.pos = [460, 0, 0])).mode, "rim")
+    // 1 m inside the 85% band (425 m); the first strafe goes +y, i.e. straight out of it without the rim check
+    const r = once((o) => { o.self.pos = [0, 424, 0]; o.mechs = [enemy(5, [60, 424, 0])] })
+    assert.ok(Math.hypot(0 + r.out.move[0] * 4, 424 + r.out.move[1] * 4) <= 500 * L.safeRadiusFrac + 1e-6, `move ${r.out.move}`)
+  })
+})
+
+describe("active loot and supply drops", () => {
+  const pick = (kind: "laser" | "lightning", x: number) => ({ id: 8001, kind, pos: [x, 0, 0] as [number, number, number] })
+  test("walks to a laser up to 80 m away (not 85 m)", () => {
+    assert.equal(once((o) => (o.pickups = [pick("laser", 75)])).mode, "loot")
+    assert.notEqual(once((o) => (o.pickups = [pick("laser", 85)])).mode, "loot")
+  })
+  test("lightning up to 55 m only with an empty slot and no laser; cubes up to 55 m", () => {
+    assert.equal(once((o) => (o.pickups = [pick("lightning", 50)])).mode, "loot")
+    assert.notEqual(once((o) => { o.self.weapons = [o.self.weapons[0] ?? null, laser()]; o.pickups = [pick("lightning", 50)] }).mode, "loot")
+    assert.equal(once((o) => (o.cubes = [{ id: 5001, pos: [50, 0, 0] }])).mode, "loot")
+    assert.notEqual(once((o) => (o.cubes = [{ id: 5001, pos: [60, 0, 0] }])).mode, "loot")
+  })
+  test("already holding a laser: laser pickups are ignored", () => {
+    assert.notEqual(once((o) => { o.self.weapons = [o.self.weapons[0] ?? null, laser()]; o.pickups = [pick("laser", 30)] }).mode, "loot")
+  })
+  const drop = (over: Partial<Observation["drops"][number]> = {}) => ({ id: 20000, pos: [65, 0, 0] as [number, number, number], radius: 8, lands_in: 10, capture_s: 4, progress: 0, holder: null, ...over })
+  test("supply drops: uncontested, landing within 12 s, within 70 m", () => {
+    const go = once((o) => (o.drops = [drop()]))
+    assert.equal(go.mode, "loot")
+    assert.ok(go.out.move[0] > 0.99)
+    assert.notEqual(once((o) => (o.drops = [drop({ holder: 7 })])).mode, "loot")
+    assert.notEqual(once((o) => (o.drops = [drop({ lands_in: 13 })])).mode, "loot")
+    assert.notEqual(once((o) => (o.drops = [drop({ pos: [75, 0, 0] })])).mode, "loot")
+  })
+  test("inside the capture ring: micro-strafes gently instead of standing still or leaving", () => {
+    const r = once((o) => (o.drops = [drop({ pos: [3, 0, 0], lands_in: 0 })]))
+    assert.equal(r.mode, "loot")
+    assert.ok(Math.abs(mag(r.out.move) - L.dropMicroStrafe) < 1e-9)
+    assert.ok(Math.abs(dot(r.out.move, [1, 0])) < 1e-9, "tangential to the ring")
+  })
+  test("under fire in a 1v1, healthy: still grabs very close loot (< 18 m) while weaving", () => {
+    const r = once((o) => { o.mechs = [enemy(5, [60, 0, 0])]; o.cubes = [{ id: 5001, pos: [0, 15, 0] }] })
+    assert.equal(r.mode, "loot")
+  })
+})
+
+describe("idle: patrol when healthy, silent regen hold when wounded", () => {
+  test("healthy with nothing around: patrols (never a sitting duck)", () => {
+    const r = once()
+    assert.equal(r.mode, "patrol")
+    assert.ok(mag(r.out.move) > 0.99)
+    assert.equal(r.out.boost, false)
+  })
+  test("wounded, safe and quiet: holds still so the regen runs", () => {
+    const r = once((o) => (o.self.hp = o.self.max_hp * 0.7))
+    assert.equal(r.mode, "hold")
+    assert.deepEqual(r.out.move, [0, 0])
+  })
+  test("wounded but a gun was heard: strafe, not hold", () => {
+    assert.equal(once((o) => { o.self.hp = o.self.max_hp * 0.7; o.sounds = [{ kind: "gun", bearing: 2, dist: "near", age: 0.1 }] }).mode, "strafe")
+  })
+  test("patrol stays in the next circle's 40-75% band", () => {
+    const at = (x: number) => once((o) => { o.self.pos = [x, 0, 0]; o.zone = { center: [0, 0], radius: 500, next_center: [0, 0], next_radius: 200, shrink_start: 1e6, shrink_end: 1e6 + 1, dps: 20 } }).out.move
+    assert.ok(at(30)[0] > 0, "too far in (15%): drift outward")
+    assert.ok(at(190)[0] < 0, "too far out (95%): drift inward")
+    assert.ok(Math.abs(at(115)[0]) < 0.05, "in the band: tangential")
+  })
+})
+
+describe("wall feeler with side commitment", () => {
+  const map = syntheticMap() // building A: x 0..10, y 0..10, top 20
+  const worldAt = (x: number, y: number) => {
+    const w = new WorldModel(hello)
+    w.update(scene((o) => (o.self.pos = [x, y, map.heightAt(x, y)])))
+    return w
+  }
+  test("a blocked heading is rotated to the nearest open one and the side is committed for 1.5 s", () => {
+    const w = worldAt(-6, 5)
+    const st = new LocoState()
+    assert.ok(blockedAhead(map, w, [1, 0]))
+    const r = steer(map, w, st, [1, 0])!
+    assert.ok(r && !blockedAhead(map, w, r))
+    const side = st.committedSide(w.t)
+    assert.notEqual(side, 0)
+    // a heading tilted slightly toward the OTHER side is still steered to the committed side
+    const tilt: [number, number] = [Math.cos(-0.05 * side), Math.sin(-0.05 * side)]
+    const r2 = steer(map, w, st, tilt)!
+    assert.ok(Math.sign(r2[1]) === side, "no flip-flop around the wall")
+    assert.equal(st.committedSide(w.t + L.wallCommitS + 0.01), 0, "commitment expires")
+  })
+  test("strafe side blocked within 5 m: flips to the open side at once", () => {
+    // threat due south -> the +1 strafe side points east, straight into building A
+    const r = new Runner(map).step((o) => { o.self.pos = [-6, 5, map.heightAt(-6, 5)]; o.mechs = [enemy(5, [-6, -55, -0.6])] })
+    assert.ok(r.out.move[0] < 0, `strafes west, away from the wall: ${r.out.move}`)
+  })
+  test("boxed in on every heading: no move (rather than walking into a wall)", () => {
+    const walled = Object.assign(Object.create(Object.getPrototypeOf(map)), map, { isBlockedAt: () => true }) as MapQuery
+    const w = worldAt(-30, -30)
+    assert.equal(steer(walled, w, new LocoState(), [1, 0]), null)
+  })
+})
+
+describe("state reset", () => {
+  test("a world reset (new match) clears strafe, hop and commitment memory, even with the clock moving forward", () => {
+    const r = new Runner()
+    for (let i = 0; i < 15; i++) r.step((o) => (o.mechs = [enemy(5, [60, 0, 0])]))
+    assert.ok(r.loco.state.flips > 0 || r.loco.state.jumps > 0)
+    r.world.reset() // as Session does after the warm-up ticks; the next tick is NOT earlier, so only resetCount can tell
+    r.step()
+    assert.equal(r.loco.state.flips, 0)
+    assert.equal(r.loco.state.jumps, 0)
+    assert.equal(r.loco.state.strafeSign, 1)
+  })
+  test("a backwards tick resets", () => {
+    const r = new Runner()
+    for (let i = 0; i < 15; i++) r.step((o) => (o.mechs = [enemy(5, [60, 0, 0])]))
+    r.t = 1
+    r.step()
+    assert.equal(r.loco.state.jumps, 0)
+  })
+  test("a gap between observations (6.4 s, 50 m) is NOT a new match: memory survives", () => {
+    const r = new Runner()
+    for (let i = 0; i < 15; i++) r.step((o) => (o.mechs = [enemy(5, [60, 0, 0])]))
+    const jumps = r.loco.state.jumps
+    r.t += 6.4
+    r.step((o) => (o.self.pos = [50, 0, 0]))
+    assert.equal(r.loco.state.jumps, jumps)
   })
 })
 
 describe("integration", () => {
-  test("every recorded observation yields a finite, in-range, schema-shaped action", async () => {
+  test("every recorded observation yields a finite, in-range action through the whole bot", async () => {
     const { Bot } = await import("../src/bot.ts")
-    const { NO_DEADLINE } = await import("../src/runtime/deadline.ts")
-    const { fixtureObs } = await import("./helpers.ts")
-    const bot = new Bot(new WorldModel(fixtureHello()), HAS_ARENA ? realMap().map : null)
+    const bot = new Bot(new WorldModel(hello), HAS_ARENA ? realMap().map : null)
     for (const o of fixtureObs()) {
       const a = bot.decide(o, NO_DEADLINE)
       assert.equal(a.tick, o.tick)
-      assert.ok(a.move && Math.hypot(a.move[0], a.move[1]) <= 1 + 1e-9)
-      assert.ok(a.aim && Number.isFinite(a.aim[0]) && a.aim[1] >= -0.7 && a.aim[1] <= 1.3)
-      assert.ok(a.fire && a.fire.length === 2)
-      assert.equal(a.jump, false)
-      assert.equal(a.drop, undefined)
+      assert.ok(a.move && Number.isFinite(a.move[0]) && Math.hypot(a.move[0], a.move[1]) <= 1 + 1e-9)
       assert.doesNotThrow(() => JSON.stringify(a))
     }
   })

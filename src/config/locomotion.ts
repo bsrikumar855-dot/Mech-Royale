@@ -27,32 +27,101 @@ export const WORLD = {
   damageMemoryS: 5,
 } as const
 
-/** Phase 1 movement rules (simple rules only; utility scoring + hysteresis are deferred until v1 is scored). */
+/**
+ * Locomotion v3: evasive anti-lead movement. Every weight, radius and threshold lives here; game physics (speeds,
+ * gravity, splash, vision memory) are read live from hello.config / self.stats.
+ */
 export const LOCOMOTION = {
-  /** Plan against the zone this many seconds ahead (zoneAt(t + zoneLeadS)). */
-  zoneLeadS: 10,
-  /** Stay inside this fraction of the current AND upcoming radius; the rim is where the damage and the crowd are. */
+  // ---- zone
+  /** Stay inside this fraction of the current radius (the rim is where the damage and the crowd are). */
   safeRadiusFrac: 0.85,
-  /** Boost only above this energy, and only when actually outside the zone. */
-  boostMinEnergy: 20,
+  /** We aim to be inside this fraction of the NEXT circle's radius before its shrink ends. */
+  nextSafeFrac: 0.9,
+  /** Start moving in when distToNextSafe / walk_speed >= max(1, shrink_end - t) - this. */
+  shrinkBufferS: 8,
+  outsideBoostMinEnergy: 10,
+  /** Perpendicular weave mixed into a zone run while under fire (fraction of the inward vector). */
+  outsideWeave: 0.35,
+  shrinkWeave: 0.5,
 
-  /** An enemy mech this close (horizontal, m) makes us back away while safely inside the zone. */
-  kiteRangeM: 40,
-  /** Weight of the sideways strafe blended into the backpedal. */
-  kiteStrafeBlend: 0.35,
-  /** If the kite step would leave the safe zone, we look this far ahead and bend inward. */
-  kiteLookaheadM: 4,
+  // ---- threat trigger (any of these -> evasive movement, at ANY range)
+  damageMemoryS: 3,
+  soundMemoryS: 2,
+  threatSoundKinds: ["gun", "laser", "laser_charge", "lightning", "mortar", "explosion"] as readonly string[],
+  projectileAlertM: 140,
+  /** Line-of-sight checks per decision (nearest listed enemies first, charging lasers before everything). */
+  maxLosChecks: 4,
 
-  /** Loot detour: only targets this close, only when no enemy mech is nearer than lootEnemyClearM. */
-  lootDetourM: 25,
-  lootEnemyClearM: 35,
-  /** Stop walking once this close to a loot target (pickup radii are 3.5 and 4 m). */
+  // ---- A-D strafing
+  /** Strafe direction flips after a deterministic, varying period in [flipMinS, flipMaxS]. */
+  flipMinS: 0.75,
+  flipMaxS: 1.15,
+  /** Flip at once if the current strafe side is blocked within this distance. */
+  strafeBlockProbeM: 5,
+  /** Range control: radial blend added to the perpendicular strafe (negative = away from the threat). */
+  retreatBlend: -0.55,
+  backpedalBlend: -0.5,
+  approachBlend: 0.3,
+  woundedHpFrac: 0.42,
+  closeM: 42,
+  closeLightningM: 52,
+  farM: 95,
+  approachMinHpFrac: 0.65,
+  /** Any move whose 4 m lookahead leaves the safe rim is bent back inward. */
+  rimLookaheadM: 4,
+
+  // ---- hops
+  jumpMinS: 1.8,
+  jumpMaxS: 2.4,
+  jumpDamageWindowS: 2,
+
+  // ---- boost
+  tacticalBoostStartEnergy: 30,
+  tacticalBoostHoldEnergy: 15,
+  mortarBoostMinEnergy: 8,
+  laserDodgeBoostMinEnergy: 12,
+
+  // ---- projectiles
+  mortarHorizonS: 4,
+  mortarStepS: 0.1,
+  /** Mortar danger radius = splash_radius + our radius + this. */
+  mortarMarginM: 3,
+  bulletHorizonS: 0.45,
+  /** A bullet ray passing within our radius + this triggers a perpendicular snap away from it. */
+  bulletClearanceExtraM: 2.5,
+  /** Charging-laser dodge: test this far to each side for a spot the charger cannot see (max 2 raycasts). */
+  laserDodgeStepM: 7,
+
+  // ---- loot (read straight from the observation: Economy decides what to take, Locomotion how far to walk)
+  closeLootM: 18,
+  closeLootMinHpFrac: 0.55,
+  lootWeave: 0.4,
+  dropRangeM: 70,
+  dropMaxLandsInS: 12,
+  /** Once this far inside a supply-drop ring, micro-strafe inside it instead of walking to its centre. */
+  dropRingInsetM: 1.5,
+  dropMicroStrafe: 0.4,
+  laserPickupRangeM: 80,
+  lightningPickupRangeM: 55,
+  cubeRangeM: 55,
   lootArriveM: 1.5,
+  lootBase: { supply_drop: 30, laser: 20, lightning: 14, cube: 10 } as Readonly<Record<string, number>>,
+  lootHalfValueM: 20,
 
-  /** Wall feeler: probe this far along the desired heading (at half and full distance). */
+  // ---- idle
+  /** Below this HP, safe and unthreatened: stand still (silent) so the out-of-combat regen runs. */
+  regenHoldHpFrac: 0.85,
+  /** Healthy and idle: patrol along a band of the next circle (fraction of its radius). */
+  patrolInnerFrac: 0.4,
+  patrolOuterFrac: 0.75,
+  /** Smaller next circles than this: patrol around the current one instead. */
+  patrolMinRadiusM: 20,
+
+  // ---- wall feeler
   feelerStepM: 4,
-  /** Rotated headings tried, in order, when the straight probe is blocked. */
-  steerAnglesDeg: [30, -30, 60, -60, 90, -90, 120, -120] as readonly number[],
+  steerAnglesDeg: [30, 60, 90, 120] as readonly number[],
+  /** Once we steer around a wall to one side, prefer that side for this long (no oscillation). */
+  wallCommitS: 1.5,
 } as const
 
 export const MAP = {
