@@ -64,7 +64,7 @@ export class LocoState {
   }
 
   private flipPeriod(): number {
-    return L.flipMinS + (L.flipMaxS - L.flipMinS) * hash01(this.slot * 1000003 + this.flips * 7919 + 1)
+    return L.flipMinS + (L.flipMaxS - L.flipMinS) * hash01(this.slot * 1000003 + this.flips * 7919 + 1 + L.timingSalt * 104729)
   }
 
   /** Advance the strafe schedule while under threat: first activation just schedules, later ones flip on time. */
@@ -95,7 +95,7 @@ export class LocoState {
   didJump(t: number): void {
     this.lastJumpT = t
     this.jumps++
-    this.jumpIntervalS = L.jumpMinS + (L.jumpMaxS - L.jumpMinS) * hash01(this.slot * 2654435 + this.jumps * 97 + 3)
+    this.jumpIntervalS = L.jumpMinS + (L.jumpMaxS - L.jumpMinS) * hash01(this.slot * 2654435 + this.jumps * 97 + 3 + L.timingSalt * 130363)
   }
 
   committedSide(t: number): 1 | -1 | 0 {

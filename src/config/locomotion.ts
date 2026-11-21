@@ -70,6 +70,14 @@ export const LOCOMOTION = {
   /** Any move whose 4 m lookahead leaves the safe rim is bent back inward. */
   rimLookaheadM: 4,
 
+  /**
+   * Noise calibration (experiment noise-cal): offsets the deterministic hash that times strafe reversals and hops.
+   * 0 = the exact 219f397 behaviour. Any other value draws the SAME distributions (flip 0.75-1.15 s, hop 1.8-2.4 s) in a
+   * different order: equal skill in expectation, different trajectories on the 48 fixed practice seeds. Scoring two such
+   * variants measures how far chaos alone moves the score.
+   */
+  timingSalt: 0,
+
   // ---- hops
   jumpMinS: 1.8,
   jumpMaxS: 2.4,
