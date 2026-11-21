@@ -6,24 +6,20 @@
  *  - Target: visible enemy MECHS with a clear MapQuery.hasShotLOS in range, ranked by time-to-kill (HP left) then
  *    distance, with bonuses (mortar carrier when we hold a laser, close, charging a laser, rear arc exposed). Drones only within
  *    npcEngageRangeM and only when no enemy mech is visible at all.
- *  - v9 sticky focus: the last mech target gets cost * (1 - stickyFocusBonus) for stickyMemoryS, so a similar-HP
- *    newcomer never flips us; another shot-line enemy below stickySwitchHp cancels the bonus (finish it).
- *  - v9 always shoot back: no hold-fire at low HP (the old regen discipline let shared-vision squads kill us free).
  *  - Gun: linear lead; fire only when self.aim, projected slewLeadS ahead toward the commanded aim at the live
  *    turn/pitch rates (the trigger is held while the torso slews), is within the angle the target's body subtends.
  *    The laser release and the lightning cone keep using the raw self.aim (hitscan fires on the first tick).
  *  - Flicker lock: the last LOS mech target out of sight for < flickerAimHoldS and no other mech with a shot line ->
  *    keep the torso on its extrapolated lead point (never fires without LOS).
- *  - Laser: hold to charge, release to fire (hitscan: aim at the centre, no lead). Vs a mech, release when the RAW
- *    aim is within atan2(radius * 1.15, dist) and charged laserReleaseChargeS (0.65 s), or when the charge already
- *    kills, or when the target is about to slip behind cover. Max-crawl: always release by laserMaxCrawlS (1.25 s);
- *    release after 0.3 s without a target; never start outside the zone or with an enemy within 22 m (half speed).
+ *  - Laser: hold to charge, release to fire (hitscan: aim at the centre, no lead). Release when aligned and fully
+ *    charged, or when the charge already kills, or when the target is about to slip behind cover; never hold an
+ *    off-target charge to the auto-fire limit; release after 0.3 s without a target; never start one outside the zone
+ *    or with an enemy within 18 m (half speed while charging).
+ *  - Regen discipline: below 35% HP inside the zone, hold fire on enemies beyond 75 m that we cannot finish (> 350
+ *    HP) so the out-of-combat regen (reset by dealing damage) can start. Keep facing them. Never in a 1v1 brawl.
  *  - Lightning (if held): instant; LOS, range, inside the cone of the actual yaw, energy.
- *  - Safe crate farming: no enemy mech has LOS or is within 50 m, in the zone, > 65% HP -> shoot the nearest crate.
- *  - v9 laser farming: no enemy mech listed at all, in the zone, laser ready -> laser the drone / crate (full charge
- *    unless it kills already); the gun waits while the laser is busy. A mech appearing redirects the laser at once,
- *    or (no shot line on it) drops the farm charge immediately.
- *  - Laser + gun weave vs mechs: the gun keeps leading and firing while the laser charges or cools down.
+ *  - Safe crate farming: no enemy mech has LOS or is within 50 m, in the zone, > 65% HP -> gun the nearest crate.
+ *  - Laser + gun weave: the gun keeps leading and firing while the laser charges or cools down.
  *  - Reload at once when empty; reload early (ammo low) only after proactiveReloadDelayS with no enemy shot line and
  *    no tracked enemy within proactiveReloadClearM (anti-blink: a 2.4 s reload is uninterruptible).
  *  - No target: hasTarget=false + threatBearing so the Arbiter faces the threat (rear hits deal x rear_mult).
@@ -73,8 +69,6 @@ export interface PriorityContext {
   frontArcDeg: number
   /** a full mech's HP (config.mech.hp), for targets whose HP we cannot see */
   fullHp: number
-  /** v9 sticky focus: the mech we were shooting (null = none / stale) */
-  stickyId?: number | null
 }
 
 /** Gun fire tolerance: the angle the target's body subtends at this distance (plus a margin), clamped. */
@@ -103,18 +97,11 @@ export function targetCost(c: Cand, p?: PriorityContext): number {
   return cost
 }
 
-/**
- * Lowest cost wins. Sticky focus: the previous mech target (p.stickyId) gets cost * (1 - stickyFocusBonus), so a
- * similar-HP newcomer never flips us, unless ANOTHER candidate is critically low (hp < stickySwitchHp).
- */
 export function pickTarget(pool: readonly Cand[], p?: PriorityContext): Cand | null {
-  const sticky = p?.stickyId ?? null
-  const otherCritical = sticky !== null && pool.some((c) => c.id !== sticky && c.hp !== undefined && c.hp < COMBAT.stickySwitchHp)
   let best: Cand | null = null
   let bestCost = Infinity
   for (const c of pool) {
-    let cost = targetCost(c, p)
-    if (c.kind === "mech" && c.id === sticky && !otherCritical) cost *= 1 - COMBAT.stickyFocusBonus
+    const cost = targetCost(c, p)
     if (cost < bestCost) {
       bestCost = cost
       best = c
@@ -177,22 +164,17 @@ export function laserTrigger(args: {
   canStart: boolean
   /** seconds since the charge last had a line-of-sight target (0 while it has one) */
   losLostFor: number
-  /** farming a crate / drone: release only at full charge (a 0.65 s shot leaves a 300 HP crate alive) unless it kills */
-  farm?: boolean
 }): boolean {
   const { world, map, laser, muzzle, target, canStart, losLostFor } = args
   const charge = laser.charge ?? 0
   if (charge <= 0) return canStart && target !== null
   // Target out of sight: keep the charge briefly (it may step back out), then release so we stop crawling at half speed.
   if (!target) return losLostFor <= COMBAT.laserLosLossS
-  // Max-crawl safety: past laserMaxCrawlS (or the auto-fire limit) release, aligned or not, and get full speed back.
-  const limit = Math.min(COMBAT.laserMaxCrawlS, stat(laser, "charge", 0) + stat(laser, "hold_s", 0) - COMBAT.laserHoldSafetyS)
+  const limit = stat(laser, "charge", 0) + stat(laser, "hold_s", 0) - COMBAT.laserHoldSafetyS
   if (charge >= limit) return false
-  // Hitscan fires along the RAW self.aim the tick we release: no post-slew projection here.
   const aligned = aimErrorRad(world.self.aim, aimAt(muzzle, target.com)) <= Math.atan2(target.radius * COMBAT.laserReleaseAimFrac, Math.max(target.dist, 1e-6))
   if (!aligned) return true
-  const full = stat(laser, "charge", 0)
-  if (charge >= (args.farm ? full : Math.min(COMBAT.laserReleaseChargeS, full))) return false
+  if (charge >= stat(laser, "charge", 0) * COMBAT.laserFullChargeFrac) return false
   if (charge >= stat(laser, "min_charge", 0) && target.hp !== undefined && laserDamage(world, laser, charge, target) >= target.hp) return false
   if (map && target.a) {
     const t = COMBAT.laserCoverLookaheadS
@@ -212,27 +194,14 @@ export class RuleCombat implements Combat {
   private lastEnemyLosT = Number.NEGATIVE_INFINITY
   /** The last mech target that had a shot line, and when (short-flicker aim lock). */
   private lastLosTarget: { id: number; t: number } | null = null
-  /** v9 sticky focus: the last mech we targeted and when. */
-  private lastTargetId: number | null = null
-  private lastTargetT = Number.NEGATIVE_INFINITY
-  /** v9: the laser charge in progress is on a crate / drone (an enemy mech appearing aborts it at once). */
-  private laserFarming = false
   private epoch = -1
   private lastTick: number | null = null
-
-  /** Sticky id for this decision (null when stale or none). */
-  stickyId(t: number): number | null {
-    return this.lastTargetId !== null && t - this.lastTargetT <= COMBAT.stickyMemoryS ? this.lastTargetId : null
-  }
 
   private sync(world: WorldModel): void {
     if (world.resetCount !== this.epoch || (this.lastTick !== null && world.tick <= this.lastTick)) {
       this.laserSeenT = Number.NEGATIVE_INFINITY
       this.lastEnemyLosT = Number.NEGATIVE_INFINITY
       this.lastLosTarget = null
-      this.lastTargetId = null
-      this.lastTargetT = Number.NEGATIVE_INFINITY
-      this.laserFarming = false
       this.epoch = world.resetCount
     }
     this.lastTick = world.tick
@@ -282,10 +251,13 @@ export class RuleCombat implements Combat {
         .filter((c) => c.los && c.dist <= Math.min(engageRange, COMBAT.npcEngageRangeM))
     }
     const fullHp = cfgNum(world.config.mech as Record<string, unknown>, "hp", self.max_hp)
-    const prio: PriorityContext = { holdsLaser: laser !== null, selfX: self.pos[0], selfY: self.pos[1], frontArcDeg: world.rules.frontArcDeg, fullHp, stickyId: this.stickyId(world.t) }
+    const prio: PriorityContext = { holdsLaser: laser !== null, selfX: self.pos[0], selfY: self.pos[1], frontArcDeg: world.rules.frontArcDeg, fullHp }
     const target = pickTarget(pool, prio)
     const hpFrac = self.max_hp > 0 ? self.hp / self.max_hp : 1
-    // v9: no hold-fire discipline. Whenever a valid target has a shot line we shoot back, whatever our HP.
+
+    // Regen discipline (strict, never in a brawl): badly wounded in the zone -> no chip shots at distant, healthy enemies.
+    const killable = (c: Cand): boolean => c.hp !== undefined && c.hp <= COMBAT.killableHp
+    const regenHold = !!target && target.kind === "mech" && hpFrac < COMBAT.regenHoldHpFrac && self.in_zone && target.dist > COMBAT.regenHoldDistM && !killable(target)
 
     const fire: [boolean, boolean] = [false, false]
     let aim: Vec2 = idle.aim
@@ -293,51 +265,9 @@ export class RuleCombat implements Combat {
     let moveConstraint: CombatOutput["moveConstraint"] = "NONE"
 
     const nearestMech = Math.min(Infinity, ...mechs.map((c) => c.dist))
-    const laserCharging = !!laser && (laser.charge ?? 0) > 0
-    const laserReady = !!laser && (laser.cooldown ?? 0) <= 0
-
-    // Short flicker (pillar, trunk): keep the torso on the lost mech target's extrapolated lead point. No fire (no LOS).
-    let flickerLock = false
-    if (!target && !mechHasLos && this.lastLosTarget && world.t - this.lastLosTarget.t < COMBAT.flickerAimHoldS) {
-      const track = world.tracks.get(this.lastLosTarget.id)
-      if (track && track.kind === "mech") {
-        const vel = world.estimateVelocity(track)
-        const since = Math.max(0, world.t - track.lastListedT)
-        const h = world.rules.height * (1 + sizePer * (track.cubes ?? 0))
-        const com: Vec3 = [track.pos[0] + vel[0] * since, track.pos[1] + vel[1] * since, track.pos[2] + vel[2] * since + h * COMBAT.comHeightFrac]
-        aim = gun ? aimAt(muzzle, leadPoint(muzzle, com, vel, stat(gun, "speed"))) : aimAt(muzzle, com)
-        hasTarget = true
-        moveConstraint = "FACE_TARGET"
-        flickerLock = true
-      }
-    }
-
-    // Safe crate farming gate (unchanged): no enemy mech has LOS, none tracked nearby, inside the zone, healthy.
-    let crate: Cand | null = null
-    if (!target && !flickerLock && !mechHasLos && self.in_zone && hpFrac > COMBAT.crateFarmMinHpFrac && !enemyNear(world, COMBAT.crateFarmEnemyClearM)) {
-      const crateCfg = world.config.crates as Record<string, unknown>
-      const ch = cfgNum(crateCfg, "height", 0)
-      const cr = cfgNum(crateCfg, "radius", 0)
-      for (const c of obs.crates ?? []) {
-        const com: Vec3 = [c.pos[0], c.pos[1], c.pos[2] + ch / 2]
-        const d = dist3(muzzle, com)
-        if (d > COMBAT.crateFarmRangeM || (crate && d >= crate.dist)) continue
-        if (map && !map.hasShotLOS(muzzle, com)) continue
-        crate = { kind: "crate", id: c.id, com, dist: d, los: true, radius: cr, hp: c.hp ?? cfgNum(crateCfg, "hp", 0) }
-      }
-    }
-
-    // v9 laser farm: NO enemy mech listed at all and inside the zone -> the drone target (<= npcEngageRangeM) or the
-    // crate (<= crateFarmRangeM) is laser-farmed. An enemy mech appearing takes over at once (below).
-    const mechTarget = target && target.kind === "mech" ? target : null
-    const farmTarget = laser && mechs.length === 0 && self.in_zone ? (target && target.kind === "npc" ? target : crate) : null
     const laserCanStart =
-      !!laser &&
-      laserReady &&
-      self.in_zone &&
-      (mechTarget ? mechTarget.dist <= laserRange && nearestMech > COMBAT.laserMinStartDistM : farmTarget !== null)
-    /** the laser is (about to be) busy with a crate / drone: the gun waits (magazine, 2.4 s reload) */
-    const laserOnFarm = !mechTarget && farmTarget !== null && (laserCanStart || laserCharging)
+      !!laser && !!target && target.kind === "mech" && target.dist <= laserRange && (laser.cooldown ?? 0) <= 0 && !regenHold && self.in_zone && nearestMech > COMBAT.laserMinStartDistM
+    const laserCharging = !!laser && (laser.charge ?? 0) > 0
 
     if (target) {
       hasTarget = true
@@ -348,39 +278,55 @@ export class RuleCombat implements Combat {
       // The laser is hitscan: while it is (about to be) charging, aim at the centre, not the lead point.
       aim = laserCanStart || laserCharging ? aimAt(muzzle, target.com) : leadAim
       // Post-slew gate: the torso keeps slewing toward `aim` while the trigger is held, so judge where it will be.
-      if (gun && gunSlot >= 0 && gunReady(gun) && !laserOnFarm && target.dist <= gunRange && aimErrorRad(postSlewAim(world, aim), leadAim) <= gunFireTolerance(target.radius, target.dist)) {
+      if (gun && gunSlot >= 0 && gunReady(gun) && !regenHold && target.dist <= gunRange && aimErrorRad(postSlewAim(world, aim), leadAim) <= gunFireTolerance(target.radius, target.dist)) {
         fire[gunSlot as 0 | 1] = true
       }
-      if (target.kind === "mech") {
-        this.lastLosTarget = { id: target.id, t: world.t }
-        this.lastTargetId = target.id
-        this.lastTargetT = world.t
+      if (target.kind === "mech") this.lastLosTarget = { id: target.id, t: world.t }
+    } else if (!mechHasLos && this.lastLosTarget && world.t - this.lastLosTarget.t < COMBAT.flickerAimHoldS) {
+      // Short flicker (pillar, trunk): keep the torso on the lost target's extrapolated lead point. No fire (no LOS).
+      const track = world.tracks.get(this.lastLosTarget.id)
+      if (track && track.kind === "mech") {
+        const vel = world.estimateVelocity(track)
+        const since = Math.max(0, world.t - track.lastListedT)
+        const h = world.rules.height * (1 + sizePer * (track.cubes ?? 0))
+        const com: Vec3 = [track.pos[0] + vel[0] * since, track.pos[1] + vel[1] * since, track.pos[2] + vel[2] * since + h * COMBAT.comHeightFrac]
+        aim = gun ? aimAt(muzzle, leadPoint(muzzle, com, vel, stat(gun, "speed"))) : aimAt(muzzle, com)
+        hasTarget = true
+        moveConstraint = "FACE_TARGET"
       }
     }
+    const flickerLock = !target && hasTarget
 
     if (laser && lzSlot >= 0) {
-      const laserTarget = mechTarget ?? farmTarget
-      if (this.laserFarming && laserCharging && mechs.length > 0 && !mechTarget) {
-        // an enemy mech showed up mid farm-charge without a shot line: drop the crate / drone charge now (full speed)
-        fire[lzSlot as 0 | 1] = false
-      } else {
-        if (laserTarget) this.laserSeenT = world.t
-        const farm = !mechTarget && farmTarget !== null
-        fire[lzSlot as 0 | 1] = laserTrigger({ world, map, laser, muzzle, target: laserTarget, canStart: laserCanStart, losLostFor: world.t - this.laserSeenT, farm })
-      }
-      this.laserFarming = fire[lzSlot as 0 | 1] && !mechTarget && farmTarget !== null
+      const laserTarget = target && target.kind === "mech" ? target : null
+      if (laserTarget) this.laserSeenT = world.t
+      fire[lzSlot as 0 | 1] = laserTrigger({ world, map, laser, muzzle, target: laserTarget, canStart: laserCanStart, losLostFor: world.t - this.laserSeenT })
     }
 
-    if (lightning && ltSlot >= 0 && self.energy > COMBAT.lightningMinEnergy && self.energy >= stat(lightning, "energy")) {
+    if (lightning && ltSlot >= 0 && !regenHold && self.energy > COMBAT.lightningMinEnergy && self.energy >= stat(lightning, "energy")) {
       const near = pool.filter((c) => c.dist <= lightningRange).sort((x, y) => x.dist - y.dist)[0]
       const half = (stat(lightning, "cone_deg") * DEG) / 2
       if (near && near.a && Math.abs(angleDiff(self.aim[0], yawTo(self.pos[0], self.pos[1], near.a.pos[0], near.a.pos[1]))) <= half) fire[ltSlot as 0 | 1] = true
     }
 
-    if (crate) {
-      hasTarget = true
-      aim = aimAt(muzzle, crate.com)
-      if (gun && gunSlot >= 0 && !laserOnFarm && gunReady(gun) && aimErrorRad(postSlewAim(world, aim), aim) <= gunFireTolerance(crate.radius, crate.dist)) fire[gunSlot as 0 | 1] = true
+    // Safe crate farming: no enemy mech has LOS, none tracked nearby, inside the zone, healthy -> gun the nearest crate.
+    if (!target && !flickerLock && gun && gunSlot >= 0 && !mechHasLos && self.in_zone && hpFrac > COMBAT.crateFarmMinHpFrac && !enemyNear(world, COMBAT.crateFarmEnemyClearM)) {
+      const crateCfg = world.config.crates as Record<string, unknown>
+      const ch = cfgNum(crateCfg, "height", 0)
+      const cr = cfgNum(crateCfg, "radius", 0)
+      let best: Cand | null = null
+      for (const c of obs.crates ?? []) {
+        const com: Vec3 = [c.pos[0], c.pos[1], c.pos[2] + ch / 2]
+        const d = dist3(muzzle, com)
+        if (d > COMBAT.crateFarmRangeM || (best && d >= best.dist)) continue
+        if (map && !map.hasShotLOS(muzzle, com)) continue
+        best = { kind: "crate", id: c.id, com, dist: d, los: true, radius: cr }
+      }
+      if (best) {
+        hasTarget = true
+        aim = aimAt(muzzle, best.com)
+        if (gunReady(gun) && aimErrorRad(postSlewAim(world, aim), aim) <= gunFireTolerance(best.radius, best.dist)) fire[gunSlot as 0 | 1] = true
+      }
     }
 
     // Anti-blink reload: a proactive (ammo > 0) reload needs proactiveReloadDelayS without any enemy shot line and no

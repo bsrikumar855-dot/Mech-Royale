@@ -87,7 +87,7 @@ describe("kill-confirm focus", () => {
   })
 })
 
-describe("v9: always shoot back (the old < 35% HP regen hold-fire is gone)", () => {
+describe("regen hold-fire (strict: < 35% HP, in zone, > 75 m, not finishable)", () => {
   const scene = (x: number, opts: { hpFrac?: number; foeHp?: number; inZone?: boolean } = {}) => {
     const desired = aimAt(MUZZLE, comOf(x, 0))
     return fight((o) => {
@@ -97,14 +97,11 @@ describe("v9: always shoot back (the old < 35% HP regen hold-fire is gone)", () 
       o.mechs = [enemy(5, [x, 0, 0], { hp: opts.foeHp ?? 1400 })]
     })
   }
-  test("25% HP vs a 1000 HP enemy at 100 m with a shot line: fires (and faces it)", () => {
-    const out = scene(100, { hpFrac: 0.25, foeHp: 1000 })
-    assert.equal(out.fire[0], true)
+  test("holds fire on a distant healthy enemy but keeps facing it", () => {
+    const out = scene(100)
+    assert.deepEqual(out.fire, [false, false])
     assert.equal(out.hasTarget, true)
-    assert.ok(Math.abs(out.aim[0]) < 0.01)
-  })
-  test("30% HP vs a full-HP enemy at 100 m: also fires (was the hold-fire case)", () => {
-    assert.equal(scene(100).fire[0], true)
+    assert.ok(Math.abs(out.aim[0]) < 0.01, "torso stays on the threat (front armour)")
   })
   test("shoots back at anything within 75 m (no hold in a brawl)", () => {
     assert.equal(scene(60).fire[0], true)
@@ -160,11 +157,10 @@ describe("laser: hold to charge, release to fire", () => {
     assert.equal(charging(0.2, { hp: 250, weapons: ["gun", "mortar"] }).fire[1], false) // 165 * 1.6 = 264
     assert.equal(charging(0.2, { hp: 250 }).fire[1], true)
   })
-  test("v9 max-crawl safety: an off-target charge is released by 1.25 s (not held to the 2.45 s auto-fire limit)", () => {
-    assert.equal(COMBAT.laserMaxCrawlS, 1.25)
-    assert.ok(COMBAT.laserMaxCrawlS < laserStats["charge"]! + laserStats["hold_s"]! - COMBAT.laserHoldSafetyS)
-    assert.equal(charging(1.25, { off: 0.3 }).fire[1], false, "1.25 s: released, full A-D speed back")
-    assert.equal(charging(1.2, { off: 0.3 }).fire[1], true, "1.2 s, still off target: keep charging")
+  test("safety: never holds an off-target charge to the auto-fire limit", () => {
+    const limit = laserStats["charge"]! + laserStats["hold_s"]! - COMBAT.laserHoldSafetyS
+    assert.equal(charging(limit + 0.01, { off: 0.3 }).fire[1], false)
+    assert.equal(charging(limit - 0.2, { off: 0.3 }).fire[1], true)
   })
   test("target lost mid-charge: holds briefly (0.3 s), then releases instead of crawling at half speed", () => {
     const combat = new RuleCombat()
@@ -339,7 +335,7 @@ describe("submission 5: post-slew gun gate", () => {
     assert.equal(shoot(0, { pitchErr: 0.12, pitch: 1 }).fire[0], false)
   })
   test("laser release still checks the RAW self.aim: a full charge 0.12 rad off keeps holding", () => {
-    const full = COMBAT.laserReleaseChargeS + 0.01
+    const full = laserStats["charge"]! * COMBAT.laserFullChargeFrac + 0.01
     const scene = (yawErr: number) =>
       fight((o) => {
         withLaser(o, laser({ charge: full }))
@@ -465,155 +461,5 @@ describe("submission 5: per-match state reset", () => {
     const out = tick(new WorldModel(hello), 10.2, 8, []) // fresh WorldModel: same resetCount (0), earlier tick
     assert.equal(out.reload, true)
     assert.equal(out.hasTarget, false)
-  })
-})
-
-// ------------------------------------------------------------------ submission 9
-describe("v9: always shoot back", () => {
-  test("25% HP: the laser still starts a charge and lightning still fires on a shot-line enemy", () => {
-    const lz = fight((o) => { o.self.hp = 0.25 * o.self.max_hp; withLaser(o); o.mechs = [enemy(5, [100, 0, 0], { hp: 1000 })] })
-    assert.equal(lz.fire[1], true, "laser charge starts")
-    const lt = fight((o) => { o.self.hp = 0.25 * o.self.max_hp; o.self.weapons = [o.self.weapons[0] ?? null, lightningWeapon(hello)]; o.mechs = [enemy(5, [30, 0, 0], { hp: 1000 })] })
-    assert.equal(lt.fire[1], true, "lightning fires")
-  })
-})
-
-describe("v9: sticky focus fire", () => {
-  // A at 60 m east (800 HP) is targeted first; B 55 m north appears with a slightly LOWER kill-confirm cost
-  const seq = () => {
-    const combat = new RuleCombat()
-    const world = new WorldModel(hello)
-    let t = 10
-    return {
-      world,
-      step: (mechs: ReturnType<typeof enemy>[]) => {
-        t += 0.1
-        return fight((o) => { o.t = t; o.tick = Math.round(t * 20); o.mechs = mechs }, { combat, world })
-      },
-    }
-  }
-  // both face us (no rear-arc bonus for either)
-  const A = (hp = 800) => enemy(5, [60, 0, 0], { hp, aim: [Math.PI, 0] })
-  const B = (hp: number) => enemy(6, [0, 55, 0], { hp, aim: [-Math.PI / 2, 0] })
-  const east = (aim: Vec2) => Math.abs(aim[0]) < 0.05
-  const north = (aim: Vec2) => Math.abs(aim[0] - Math.PI / 2) < 0.05
-  test("control: with no history the lower-cost newcomer (760 HP at 55 m) wins", () => {
-    assert.ok(north(fight((o) => (o.mechs = [A(), B(760)])).aim))
-  })
-  test("locked on A: a similar-HP second enemy does not flip us", () => {
-    const s = seq()
-    assert.ok(east(s.step([A()]).aim))
-    assert.ok(east(s.step([A(), B(760)]).aim), "stays on A")
-    assert.ok(east(s.step([A(), B(760)]).aim), "still A next tick (no flip-flop)")
-  })
-  test("switches to a critically low (200 HP) newcomer, or one much closer to dying (400 HP)", () => {
-    const s = seq()
-    s.step([A()])
-    assert.ok(north(s.step([A(), B(200)]).aim), "200 HP: finish it")
-    const s2 = seq()
-    s2.step([A()])
-    assert.ok(north(s2.step([A(), B(400)]).aim), "400 HP: cost 620 beats sticky A 768")
-  })
-  test("the critical-low rule alone flips the lock: sticky A (300 HP) vs a 240 HP newcomer 80 m out", () => {
-    // without the rule: sticky A 300 * 1.6 * 0.6 = 288 beats B 240 * 1.8 = 432; with it A has no bonus (480) and B wins
-    const s = seq()
-    s.step([A(300)])
-    const far = (hp: number) => enemy(6, [0, 80, 0], { hp, aim: [-Math.PI / 2, 0] })
-    assert.ok(north(s.step([A(300), far(240)]).aim), "240 < 250: switch")
-    const s2 = seq()
-    s2.step([A(300)])
-    assert.ok(east(s2.step([A(300), far(260)]).aim), "260: not critical, the lock holds")
-  })
-  test("the lock expires 2 s after A was last targeted", () => {
-    const s = seq()
-    s.step([A()])
-    for (let i = 0; i < 21; i++) s.step([])
-    assert.ok(north(s.step([A(), B(760)]).aim))
-  })
-  test("a world reset (resetCount) clears the lock", () => {
-    const s = seq()
-    s.step([A()])
-    s.world.reset()
-    assert.ok(north(s.step([A(), B(760)]).aim))
-  })
-})
-
-describe("v9: snappier laser", () => {
-  const at100 = (charge: number, off = 0) => {
-    const c = aimAt(MUZZLE, comOf(100, 0))
-    return fight((o) => { withLaser(o, laser({ charge })); o.self.aim = [c[0] + off, c[1]]; o.mechs = [enemy(5, [100, 0, 0])] })
-  }
-  test("aligned: releases at >= 0.65 s, keeps charging at 0.6 s", () => {
-    assert.equal(at100(0.65).fire[1], false)
-    assert.equal(at100(0.6).fire[1], true)
-  })
-  test("release window is atan2(radius * 1.15, dist) of the RAW aim", () => {
-    const tol = Math.atan2(2.5 * 1.15, Math.hypot(100, 2.5))
-    assert.equal(at100(0.7, tol * 0.9).fire[1], false, "inside 1.15 radii: release")
-    assert.equal(at100(0.7, tol * 1.2).fire[1], true, "outside: keep charging")
-  })
-  test("never starts a charge with an enemy mech within 22 m (was 18 m)", () => {
-    assert.equal(fight((o) => { withLaser(o); o.mechs = [enemy(5, [100, 0, 0]), enemy(6, [20, 0, 0])] }).fire[1], false)
-    assert.equal(fight((o) => { withLaser(o); o.mechs = [enemy(5, [100, 0, 0]), enemy(6, [25, 0, 0])] }).fire[1], true)
-  })
-})
-
-describe("v9: laser crate / drone farming", () => {
-  const crate = (x: number, hp = 300) => ({ id: 1001, pos: [x, 0, 0] as [number, number, number], hp })
-  const drone = (x: number) => ({ id: 101, kind: "npc" as const, pos: [x, 0, 0] as [number, number, number], vel: [0, 0, 0] as [number, number, number], aim: [0, 0] as [number, number], hp: 350, max_hp: 350 })
-  const cAim = (x: number, h: number): Vec2 => aimAt(MUZZLE, [x, 0, h / 2])
-  const crateH = (hello.config.crates as Record<string, number>)["height"]!
-  const npcH = (hello.config.npc as Record<string, number>)["height"]!
-  test("safe, laser ready: starts charging on a 300 HP crate at 40 m and the gun holds (no magazine burn)", () => {
-    const out = fight((o) => { withLaser(o); o.crates = [crate(40)]; o.self.aim = cAim(40, crateH) })
-    assert.equal(out.fire[1], true, "laser charge")
-    assert.equal(out.fire[0], false, "gun waits")
-  })
-  test("crate: holds to the full 0.75 s charge (0.65 s = 287 dmg < 300 HP), releases at full; releases early on a kill", () => {
-    const at = (charge: number, hp = 300) => fight((o) => { withLaser(o, laser({ charge })); o.crates = [crate(40, hp)]; o.self.aim = cAim(40, crateH) })
-    assert.equal(at(0.66).fire[1], true, "0.66 s = 290 dmg < 300: keep charging")
-    assert.equal(at(0.7).fire[1], false, "0.70 s = 301 dmg: kills, release")
-    assert.equal(at(0.66, 400).fire[1], true)
-    assert.equal(at(0.75, 400).fire[1], false, "full charge: release even if it does not kill")
-    assert.equal(at(0.66, 400).fire[0], false)
-    assert.equal(at(0.3, 150).fire[1], false, "192 dmg >= 150 HP: release now")
-  })
-  test("laser on cooldown: the gun weaves on the crate", () => {
-    const out = fight((o) => { withLaser(o, laser({ cooldown: 1 })); o.crates = [crate(40)]; o.self.aim = cAim(40, crateH) })
-    assert.deepEqual(out.fire, [true, false])
-  })
-  test("350 HP drone at 35 m: laser charge at its centre, gun holds", () => {
-    const out = fight((o) => { withLaser(o); o.mechs = [drone(35)]; o.self.aim = cAim(35, npcH) })
-    assert.equal(out.fire[1], true)
-    assert.equal(out.fire[0], false)
-    const centre = aimAt(MUZZLE, [35, 0, npcH * COMBAT.comHeightFrac])
-    assert.ok(Math.abs(out.aim[0] - centre[0]) < 1e-9 && Math.abs(out.aim[1] - centre[1]) < 1e-9)
-  })
-  test("no laser farming outside the zone", () => {
-    assert.equal(fight((o) => { withLaser(o); o.self.in_zone = false; o.mechs = [drone(35)] }).fire[1], false)
-  })
-  test("an enemy mech with a shot line appears mid farm-charge: the laser and aim redirect to it at once", () => {
-    const combat = new RuleCombat()
-    const world = new WorldModel(hello)
-    fight((o) => { o.t = 10; o.tick = 200; withLaser(o, laser({ charge: 0.4 })); o.crates = [crate(40)]; o.self.aim = cAim(40, crateH) }, { combat, world })
-    const out = fight((o) => { o.t = 10.1; o.tick = 202; withLaser(o, laser({ charge: 0.5 })); o.crates = [crate(40)]; o.mechs = [enemy(5, [0, 100, 0])] }, { combat, world })
-    assert.ok(Math.abs(out.aim[0] - Math.PI / 2) < 0.05, `aim on the mech (north): ${out.aim}`)
-    assert.equal(out.fire[1], true, "0.5 s, not aligned yet: keep the charge for the mech")
-  })
-  test("an enemy mech appears mid farm-charge WITHOUT a shot line: release at once (no 0.3 s crawl)", () => {
-    const map = syntheticMap()
-    const combat = new RuleCombat()
-    const world = new WorldModel(hello)
-    const me: [number, number, number] = [-20, 5, -2]
-    // crate south of us in the open; the mech is hidden behind building A
-    fight((o) => { o.t = 10; o.tick = 200; o.self.pos = [...me]; withLaser(o, laser({ charge: 0.4 })); o.crates = [{ id: 1001, pos: [-20, -25, -2], hp: 300 }] }, { combat, world, map })
-    const out = fight((o) => { o.t = 10.1; o.tick = 202; o.self.pos = [...me]; withLaser(o, laser({ charge: 0.5 })); o.crates = [{ id: 1001, pos: [-20, -25, -2], hp: 300 }]; o.mechs = [enemy(5, [20, 5, 2])] }, { combat, world, map })
-    assert.equal(out.fire[1], false, "released immediately")
-    // control: the same tick after a charge on a VISIBLE mech holds through the 0.3 s LOS-loss window
-    const c2 = new RuleCombat()
-    const w2 = new WorldModel(hello)
-    fight((o) => { o.t = 10; o.tick = 200; o.self.pos = [...me]; withLaser(o, laser({ charge: 0.4 })); o.mechs = [enemy(7, [-20, -25, -2])] }, { combat: c2, world: w2, map })
-    const ctl = fight((o) => { o.t = 10.1; o.tick = 202; o.self.pos = [...me]; withLaser(o, laser({ charge: 0.5 })); o.crates = [{ id: 1001, pos: [-20, -25, -2], hp: 300 }]; o.mechs = [enemy(5, [20, 5, 2])] }, { combat: c2, world: w2, map })
-    assert.equal(ctl.fire[1], true, "control: a mech-target charge holds through a short LOS loss")
   })
 })

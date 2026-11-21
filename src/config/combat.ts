@@ -29,6 +29,8 @@ export const COMBAT = {
   // ---- kill-confirm focus (cost = HP left * (1 + dist / killDistScaleM) * product of (1 - bonus); lower wins)
   /** Time-to-kill dominates: HP left first, distance second. Unknown HP counts as full mech HP. */
   killDistScaleM: 100,
+  /** An enemy at or below this HP is finishable (a laser release or a short gun burst). */
+  killableHp: 350,
   /** We hold a laser and it carries a mortar: laser cook-off (+60%). */
   cookoffTargetBonus: 0.3,
   closeThreatM: 50,
@@ -37,34 +39,28 @@ export const COMBAT = {
   /** We would hit its rear arc (x rear_mult). */
   rearArcBonus: 0.1,
 
-  // ---- v9 sticky focus fire: keep shooting the same mech (2v1s are won by deleting one bot fast)
-  /** The last mech target's cost is multiplied by (1 - this) while it is still a valid target... */
-  stickyFocusBonus: 0.4,
-  /** ...remembered this long after it was last targeted... */
-  stickyMemoryS: 2,
-  /** ...unless ANOTHER shot-line enemy is critically low (below this HP): then the plain kill-confirm cost decides. */
-  stickySwitchHp: 250,
+  // ---- regen hold-fire discipline (dealing damage resets the 5 s out-of-combat regen timer). Strict: never in a 1v1 brawl.
+  regenHoldHpFrac: 0.35,
+  /** Hold fire only on targets farther than this that we cannot finish (hp > killableHp). */
+  regenHoldDistM: 75,
 
-  // ---- laser: hold to charge, release to fire (hitscan: no lead). Charging halves walk speed: keep it short.
-  /** Vs a mech, release once charged this long (capped at the weapon's full charge time stats.charge)... */
-  laserReleaseChargeS: 0.65,
-  /** ...and only when the RAW self.aim error is within atan2(targetRadius * this, dist). */
-  laserReleaseAimFrac: 1.15,
-  /** Max-crawl safety: never hold a charge past this (aligned or not) so A-D strafing gets full speed back. */
-  laserMaxCrawlS: 1.25,
+  // ---- laser: hold to charge, release to fire (hitscan: no lead)
+  /** Release once charged to this fraction of the full charge time (stats.charge): ~0.70 s of 0.75 s... */
+  laserFullChargeFrac: 0.93,
+  /** ...and only when the actual aim error is within atan2(targetRadius * this, dist). */
+  laserReleaseAimFrac: 0.9,
   /** Never hold an off-target charge later than charge + hold_s - this (it would auto-fire anyway). */
   laserHoldSafetyS: 0.3,
   /** Look-ahead used to release before the target slips behind cover. */
   laserCoverLookaheadS: 0.2,
   /** Mid-charge, release if the target has been out of line of sight this long (do not crawl at half speed). */
   laserLosLossS: 0.3,
-  /** Do not START a charge with an enemy mech this close (half speed in its face). */
-  laserMinStartDistM: 22,
+  /** Do not START a charge with an enemy mech this close (half speed in its face)... */
+  laserMinStartDistM: 18,
+  /** ...unless the charge is already this far along. */
+  laserCommitChargeS: 0.3,
 
-  // ---- safe crate farming: no enemy mech has LOS, none tracked within crateFarmEnemyClearM.
-  // v9: with a laser off cooldown and NO enemy mech listed at all (in the zone), crates and drones are laser-farmed
-  // (one full charge ~ 315 damage vs 300 HP crates / 350 HP drones), released at full charge unless it already kills;
-  // the gun weaves only while the laser is unavailable (saves the magazine and the 2.4 s reload).
+  // ---- safe crate farming (gun only): no enemy mech has LOS, none tracked within crateFarmEnemyClearM
   crateFarmEnemyClearM: 50,
   crateFarmMinHpFrac: 0.65,
   crateFarmRangeM: 45,
