@@ -16,14 +16,12 @@ import { LOCOMOTION as L } from "../config/index.ts"
 import type { Locomotion, LocomotionOutput, LootTarget, TickContext } from "../types/contracts.ts"
 import type { Vec2, Vec3 } from "../types/mechfight.ts"
 import { clamp, dist2d, unit2 } from "../world/geom.ts"
-import type { MapQuery } from "../world/map.ts"
 import type { WorldModel } from "../world/world.ts"
-import { shouldSlice, sliceCover } from "./cover.ts"
 import { sense, type Sensed } from "./sense.ts"
 import { LocoState } from "./state.ts"
 import { blockedAhead, steer } from "./steer.ts"
 
-export type Mode = "cover" | "farm" | "hunt" | "mortar" | "outside" | "laserDodge" | "shrink" | "retreat" | "backpedal" | "approach" | "strafe" | "loot" | "rim" | "hold" | "patrol" | "idle"
+export type Mode = "hunt" | "mortar" | "outside" | "laserDodge" | "shrink" | "retreat" | "backpedal" | "approach" | "strafe" | "loot" | "rim" | "hold" | "patrol" | "idle"
 
 const add = (a: Vec2, b: Vec2, k: number): Vec2 => [a[0] + b[0] * k, a[1] + b[1] * k]
 const norm = (v: Vec2): Vec2 | null => unit2(v[0], v[1])
@@ -139,12 +137,7 @@ export class EvasiveLocomotion implements Locomotion {
       // v5 post-kill scoop: no shot line on us -> cubes up to 25 m; one shooter -> a cube within 14 m above 45% HP
       const scoopR = sn.losCount === 0 ? L.scoopNoLosM : sn.losCount === 1 && hpFrac > L.scoopOneLosMinHpFrac ? L.scoopOneLosM : 0
       const loot = close18 ?? (scoopR > 0 ? this.pickLoot(world, inSafe, scoopR, { cubesOnly: true }) : null)
-      // v6 ground corner slice: ONLY in crossfire (>= 2 shot lines); a probe fewer shooters can hit turns it into a 1v1
-      const slice = map && shouldSlice(sn) ? sliceCover(map, world, sn, { inSafe, prevHeading: S.sliceHeading && t - S.sliceT <= L.sliceHeadingMemoryS ? S.sliceHeading : null }) : null
-      if (slice && slice.exposed < slice.current) {
-        mode = "cover"
-        dir = slice.dir
-      } else if (sn.losCount >= 2 || hpFrac < L.woundedHpFrac) {
+      if (sn.losCount >= 2 || hpFrac < L.woundedHpFrac) {
         mode = "retreat"
         dir = norm(add(perp, towardThreat, L.retreatBlend))
       } else if (close) {
@@ -172,8 +165,7 @@ export class EvasiveLocomotion implements Locomotion {
         (self.cubes < L.huntCubeCap || !holdsLaser)
       const loot = this.pickLoot(world, inSafe, Infinity, { hunt: huntOpen })
       if (loot && loot.standoff !== undefined && loot.com) {
-        // drone / crate: walk in until Combat has a shot line within the stand-off, then circle-strafe it (never a
-        // stationary target) inside the farmMinM..farmMaxM band while Combat shoots
+        // drone / crate: walk in until Combat has a shot line within the stand-off, then hold still while it shoots
         mode = "hunt"
         const muzzle: Vec3 = [px, py, self.pos[2] + world.selfStat("muzzle_height", world.rules.muzzleHeight)]
         const d3 = Math.hypot(loot.com[0] - muzzle[0], loot.com[1] - muzzle[1], loot.com[2] - muzzle[2])
@@ -181,9 +173,6 @@ export class EvasiveLocomotion implements Locomotion {
         if (!inPosition) {
           const tl = toward(loot.x, loot.y)
           dir = tl && perp && sn.active ? norm(add(tl, perp, L.lootWeave)) : tl
-        } else {
-          mode = "farm"
-          dir = this.farmOrbit(world, map, inSafe, muzzle, loot.com, d3)
         }
       } else if (loot) {
         mode = "loot"
@@ -210,7 +199,7 @@ export class EvasiveLocomotion implements Locomotion {
     }
 
     // keep evasive / loot / patrol moves inside the safe rim (the zone modes already point inward)
-    const rimChecked: readonly Mode[] = ["cover", "farm", "hunt", "retreat", "backpedal", "approach", "strafe", "loot", "patrol", "laserDodge"]
+    const rimChecked: readonly Mode[] = ["hunt", "retreat", "backpedal", "approach", "strafe", "loot", "patrol", "laserDodge"]
     if (dir && rimChecked.includes(mode)) {
       const m = Math.hypot(dir[0], dir[1])
       if (!inSafe(px + (dir[0] / m) * L.rimLookaheadM, py + (dir[1] / m) * L.rimLookaheadM)) {
@@ -225,15 +214,6 @@ export class EvasiveLocomotion implements Locomotion {
       boost = S.isBoosting
     } else {
       S.isBoosting = false
-    }
-    // v6 slice boost latch: snap around the corner (never while our own laser charges)
-    if (mode === "cover" && dir && !ourLaserCharging) {
-      S.sliceBoosting = energy >= (S.sliceBoosting ? L.sliceBoostHoldEnergy : L.sliceBoostStartEnergy)
-      boost = S.sliceBoosting
-      S.sliceHeading = [dir[0], dir[1]]
-      S.sliceT = t
-    } else {
-      S.sliceBoosting = false
     }
 
     // anti-lead hop
@@ -302,35 +282,6 @@ export class EvasiveLocomotion implements Locomotion {
       for (const c of obs.crates ?? []) consider(c.pos[0], c.pos[1], "crate", L.huntTargetRangeM, undefined, { com: [c.pos[0], c.pos[1], c.pos[2] + h / 2], standoff: L.huntCrateStandoffM })
     }
     return best
-  }
-
-  /**
-   * v6 moving farm: tangent around the target (orbit side S.farmSign) plus a radial correction outside the
-   * farmMinM..farmMaxM band. A wall, the safe rim, or a lost shot line farmProbeM along the orbit flips the side
-   * (max 2 shot-line raycasts); if both sides are bad, close straight in.
-   */
-  private farmOrbit(world: WorldModel, map: MapQuery | null, inSafe: (x: number, y: number) => boolean, muzzle: Vec3, com: Vec3, d3: number): Vec2 | null {
-    const S = this.state
-    const [px, py] = world.self.pos
-    const toT = norm([com[0] - px, com[1] - py])
-    if (!toT) return null
-    const radial = d3 > L.farmMaxM ? L.farmRadialGain : d3 < L.farmMinM ? -L.farmRadialGain : 0
-    const heading = (sign: 1 | -1): Vec2 | null => norm(add([-toT[1] * sign, toT[0] * sign], toT, radial))
-    const ok = (d: Vec2): boolean => {
-      const qx = px + d[0] * L.farmProbeM
-      const qy = py + d[1] * L.farmProbeM
-      if (!inSafe(qx, qy)) return false
-      if (!map) return true
-      return !blockedAhead(map, world, d, L.farmProbeM) && map.hasShotLOS([qx, qy, muzzle[2]], com)
-    }
-    for (const sign of [S.farmSign, S.farmSign === 1 ? -1 : 1] as const) {
-      const d = heading(sign)
-      if (d && ok(d)) {
-        S.farmSign = sign
-        return d
-      }
-    }
-    return toT
   }
 
   /** Healthy and idle: circle the next zone's mid band so we keep moving and keep finding loot. */

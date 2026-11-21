@@ -128,30 +128,6 @@ export const LOCOMOTION = {
   /** Loot value bases for hunt targets (value = base / (1 + dist / lootHalfValueM); a laser at 80 m beats a crate at 40 m). */
   huntBase: { npc: 12, crate: 8 } as Readonly<Record<string, number>>,
 
-  // ---- v6: moving farm. Once in position (stand-off + shot line), circle-strafe the drone / crate instead of holding.
-  /** Keep the muzzle-to-centre distance inside this band (radial correction outside it). */
-  farmMinM: 28,
-  farmMaxM: 36,
-  /** Radial correction weight added to the tangent when outside the band. */
-  farmRadialGain: 0.6,
-  /** Probe this far along the orbit heading: a wall, the safe rim or a lost shot line there flips the orbit side. */
-  farmProbeM: 4,
-
-  // ---- v6: ground-only 2v1+ corner slicing (ONLY with >= 2 shot-line enemies; never in a 1v1)
-  sliceMinLosEnemies: 2,
-  sliceProbes: 8,
-  sliceProbeM: 12,
-  /** Exposure is checked against at most this many of the nearest shot-line enemies (<= 24 raycasts). */
-  sliceMaxEnemies: 3,
-  /** Score = exposed * this - away * sliceAwayWeight - previous-heading alignment * sliceHeadingWeight (lower wins). */
-  sliceExposedWeight: 100,
-  sliceAwayWeight: 6,
-  sliceHeadingWeight: 3,
-  sliceHeadingMemoryS: 1,
-  /** Snap-behind-the-corner boost latch. */
-  sliceBoostStartEnergy: 28,
-  sliceBoostHoldEnergy: 14,
-
   // ---- v5: post-kill cube scoop while under fire
   /** Nobody has a shot line on us (unseen shooter, stray projectile): scoop cubes up to this far. */
   scoopNoLosM: 25,

@@ -37,18 +37,7 @@ export class LocoState {
   isBoosting = false
   patrolSign: 1 | -1 = 1
 
-  /** v6: orbit side around a farmed drone / crate (flips on a wall, the safe rim, or a lost shot line). */
-  farmSign: 1 | -1 = 1
-  /** v6: last 2v1 slice heading and when (hysteresis), and the slice boost latch. */
-  sliceHeading: Vec2 | null = null
-  sliceT = Number.NEGATIVE_INFINITY
-  sliceBoosting = false
-
   reset(): void {
-    this.farmSign = 1
-    this.sliceHeading = null
-    this.sliceT = Number.NEGATIVE_INFINITY
-    this.sliceBoosting = false
     this.lastTick = null
     this.lastPos = null
     this.strafeSign = 1
