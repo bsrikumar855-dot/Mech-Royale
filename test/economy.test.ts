@@ -18,15 +18,15 @@ describe("upgrade ranking and offer picking", () => {
     assert.deepEqual([...ECONOMY.upgradePriority].sort(), [...ids].sort(), "priority list and hello.config.upgrades must match exactly")
   })
 
-  test("survivability, then the DPS snowball, then regen/mobility: armor > plating > gun_rate > gun_damage > laser > nanites > servos", () => {
+  test("submission 24: the DPS snowball now leads, then survivability, then laser, then regen/mobility: gun_rate > gun_damage > armor > plating > laser > nanites > servos", () => {
     const rank = (id: string): number => ECONOMY.upgradePriority.indexOf(id)
-    for (const [a, b] of [["armor", "plating"], ["plating", "gun_rate"], ["gun_rate", "gun_damage"], ["gun_damage", "laser_damage"], ["laser_damage", "laser_charge"], ["laser_charge", "nanites"], ["nanites", "servos"], ["servos", "gun_mag"], ["capacitor", "lightning_efficiency"], ["sensors", "mortar_reload"]] as const) {
+    for (const [a, b] of [["gun_rate", "gun_damage"], ["gun_damage", "armor"], ["armor", "plating"], ["plating", "laser_damage"], ["laser_damage", "laser_charge"], ["laser_charge", "nanites"], ["nanites", "servos"], ["servos", "gun_mag"], ["capacitor", "lightning_efficiency"], ["sensors", "mortar_reload"]] as const) {
       assert.ok(rank(a) < rank(b), `${a} should outrank ${b}`)
     }
   })
 
   test("picks the best-ranked choice by index; an offer always produces a pick", () => {
-    assert.equal(bestUpgradeIndex([choice("gun_damage"), choice("armor"), choice("sensors")]), 1)
+    assert.equal(bestUpgradeIndex([choice("gun_damage"), choice("armor"), choice("sensors")]), 0, "submission 24: gun_damage now outranks armor")
     assert.equal(bestUpgradeIndex([choice("lightning_chain"), choice("gun_rate"), choice("jets")]), 1)
     assert.equal(bestUpgradeIndex([choice("mortar_splash"), choice("sensors"), choice("jets")]), 1)
     const o = cleanObs((x) => (x.offer = { id: 1, expires: 99, choices: [choice("gun_velocity"), choice("plating"), choice("gun_mag")] }))

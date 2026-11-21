@@ -506,7 +506,7 @@ describe("v5: post-kill cube scoop under fire", () => {
 })
 
 describe("v5: snowball upgrade order", () => {
-  test("armor, plating, gun_rate, gun_damage, laser_damage, laser_charge, nanites lead; mortar_* are the last three", async () => {
+  test("gun_rate, gun_damage, armor, plating, laser_damage, laser_charge, nanites lead (submission 24 reorders within this same top 7); mortar_* are the last three", async () => {
     const { ECONOMY } = await import("../src/config/index.ts")
     const p = ECONOMY.upgradePriority
     assert.deepEqual([...p.slice(0, 7)].sort(), ["armor", "gun_damage", "gun_rate", "laser_charge", "laser_damage", "nanites", "plating"])

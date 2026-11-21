@@ -1,16 +1,21 @@
 /** OWNER: Person B. Economy tunables. Game mechanics (costs, caps, effects) come from hello.config, never from here. */
 export const ECONOMY = {
   /**
-   * Upgrade priority, best first: survivability (armor, plating) then the DPS snowball (gun rate/damage, laser), then
-   * regen and mobility. Offers only contain weapon upgrades for weapons we hold, so laser_* appear once we carry one.
-   * ALL 22 ids of hello.config.upgrades are ranked (a test enforces it). An id not listed here (a balance change adds
-   * one) ranks after every listed id instead of silently winning, and ties keep the server's choice order.
+   * Upgrade priority, best first. EXPERIMENT (submission 24): the DPS snowball (gun rate/damage) now ranks ABOVE
+   * survivability (armor, plating), inverting the assumption every prior build has made. Rationale: placement is
+   * confirmed driven by kills here (ghostHold, submission 18, -2.79 for refusing to finish weak enemies), and every
+   * cube already grants +4% HP and +4% damage up to 10 cubes regardless of which upgrade is picked -- the upgrade
+   * choice is a multiplier on TOP of that passive growth, so the question is only which multiplier compounds faster.
+   * Then laser/regen/mobility, as before. Offers only contain weapon upgrades for weapons we hold, so laser_*
+   * appear once we carry one. ALL 22 ids of hello.config.upgrades are ranked (a test enforces it). An id not listed
+   * here (a balance change adds one) ranks after every listed id instead of silently winning, and ties keep the
+   * server's choice order.
    */
   upgradePriority: [
-    "armor", // -8% damage taken
-    "plating", // +15% max HP
     "gun_rate",
     "gun_damage",
+    "armor", // -8% damage taken
+    "plating", // +15% max HP
     "laser_damage",
     "laser_charge",
     "nanites", // faster out-of-combat regen
