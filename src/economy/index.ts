@@ -1,12 +1,15 @@
 /**
- * OWNER: Person B. Economy: offer picking, weapon take, and valuing loot into LootTarget[].
+ * OWNER: Person B. Economy: offer picking, weapon take/swap, and valuing loot into LootTarget[].
  * Contract: src/types/contracts.ts (EconomyOutput). Read-only access to WorldModel. Never throws past decide().
  *
- * v1 rules (survival first: placement counts, kills do not):
+ * Rules (survival first: placement counts, kills do not):
  *  - pick: whenever an offer is pending, choose the best-ranked choice by ECONOMY.upgradePriority.
- *  - take: ONLY lightning, ONLY into an EMPTY slot, ONLY within loot.pickup_radius (horizontal) and 4 m (vertical).
- *    mortar (cook-off exposure, no ballistics yet) and laser are skipped on purpose.
- *  - lootTargets: visible cubes, plus lightning pickups while slot 1 could take one; value falls with distance.
+ *  - take: laser or lightning (laser preferred) into an EMPTY slot, within loot.pickup_radius (horizontal) and 4 m
+ *    (vertical). Mortar is skipped on purpose (laser cook-off exposure, no ballistics yet).
+ *  - swap: holding lightning, a laser in reach and no enemy mech within swapNoEnemyM -> take the laser, drop the
+ *    lightning's slot. (The Arbiter independently refuses any drop of a slot whose laser is charging.)
+ *  - lootTargets: visible cubes, pickups we would take or swap to, and uncontested supply drops landing within
+ *    10 s and 45 m; value falls with distance.
  */
 import { ECONOMY } from "../config/index.ts"
 import type { Economy, EconomyOutput, LootTarget, TickContext } from "../types/contracts.ts"
@@ -30,13 +33,23 @@ export function bestUpgradeIndex(choices: readonly OfferChoice[]): number | unde
 const heldKinds = (self: SelfObs): string[] => self.weapons.flatMap((w) => (w ? [w.kind] : []))
 const hasEmptySlot = (self: SelfObs): boolean => self.weapons.some((w) => w === null)
 
-/** Would we take this pickup if we were standing on it? (right kind, free slot, not already held) */
+/** Would we pick this up into an empty slot? (a kind we take, a free slot, not already held) */
 export function wantsPickup(self: SelfObs, p: PickupObs): boolean {
   return ECONOMY.takeKinds.includes(p.kind) && hasEmptySlot(self) && !heldKinds(self).includes(p.kind)
 }
 
+/** Would we swap our lightning for this pickup? (a laser, both slots full, holding lightning, no laser yet) */
+export function wantsSwap(self: SelfObs, p: PickupObs): boolean {
+  const held = heldKinds(self)
+  return p.kind === "laser" && !hasEmptySlot(self) && held.includes("lightning") && !held.includes("laser")
+}
+
 const horiz = (ax: number, ay: number, bx: number, by: number): number => Math.hypot(bx - ax, by - ay)
 const valueAt = (base: number, dist: number): number => base / (1 + dist / ECONOMY.halfValueDistanceM)
+const preference = (kind: string): number => {
+  const i = ECONOMY.takeKinds.indexOf(kind)
+  return i === -1 ? Infinity : i
+}
 
 export class RuleEconomy implements Economy {
   decide(ctx: TickContext): EconomyOutput {
@@ -53,18 +66,39 @@ export class RuleEconomy implements Economy {
     }
 
     const reach = world.config.loot.pickup_radius
-    let takeDist = Infinity
+    const enemyClose = (obs.mechs ?? []).some((m) => m.kind === "mech" && horiz(sx, sy, m.pos[0], m.pos[1]) < ECONOMY.swapNoEnemyM)
+    let take: { id: number; pref: number; d: number; drop?: 0 | 1 } | null = null
     for (const p of obs.pickups ?? []) {
-      if (!wantsPickup(self, p)) continue
+      const fill = wantsPickup(self, p)
+      const swap = wantsSwap(self, p)
+      if (!fill && !swap) continue
       const d = horiz(sx, sy, p.pos[0], p.pos[1])
-      if (d <= reach && Math.abs(p.pos[2] - sz) <= ECONOMY.pickupVerticalM && d < takeDist) {
-        takeDist = d
-        out.take = p.id
+      out.lootTargets.push(target(p.pos, valueAt(ECONOMY.lootBaseValue[p.kind] ?? 0, d), "weapon"))
+      if (d > reach || Math.abs(p.pos[2] - sz) > ECONOMY.pickupVerticalM) continue
+      if (swap && enemyClose) continue
+      const pref = preference(p.kind)
+      if (!take || pref < take.pref || (pref === take.pref && d < take.d)) {
+        take = { id: p.id, pref, d }
+        if (swap) {
+          const slot = self.weapons.findIndex((w) => w?.kind === "lightning")
+          if (slot === 0 || slot === 1) take.drop = slot
+        }
       }
-      out.lootTargets.push(target(p.pos, valueAt(ECONOMY.lootBaseValue["weapon"] ?? 0, d), "weapon"))
+    }
+    if (take) {
+      out.take = take.id
+      if (take.drop !== undefined) out.drop = take.drop
     }
     for (const c of obs.cubes ?? []) {
       out.lootTargets.push(target(c.pos, valueAt(ECONOMY.lootBaseValue["cube"] ?? 0, horiz(sx, sy, c.pos[0], c.pos[1])), "cube"))
+    }
+    // Supply drops (3 cubes + full HP + full energy): only uncontested ones that land soon and are close.
+    for (const d of obs.drops ?? []) {
+      const dist = horiz(sx, sy, d.pos[0], d.pos[1])
+      const free = d.holder === null || d.holder === self.id
+      if (free && d.lands_in <= ECONOMY.dropMaxLandsInS && dist <= ECONOMY.dropRangeM) {
+        out.lootTargets.push(target(d.pos, valueAt(ECONOMY.lootBaseValue["supply_drop"] ?? 0, dist), "supply_drop"))
+      }
     }
     return out
   }

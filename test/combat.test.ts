@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { describe, test } from "node:test"
 import { aimAt, leadPoint } from "../src/combat/aim.ts"
-import { RuleCombat, needsReload, pickTarget } from "../src/combat/index.ts"
+import { gunFireTolerance, RuleCombat, needsReload, pickTarget } from "../src/combat/index.ts"
 import { COMBAT } from "../src/config/index.ts"
 import type { ActorObs, Observation, Vec2 } from "../src/types/mechfight.ts"
 import { aimErrorRad, yawTo } from "../src/world/geom.ts"
@@ -89,18 +89,17 @@ describe("slew-tolerance fire gate", () => {
     assert.equal(out.hasTarget, true)
   })
 
-  test("the gate is the configured angle: inside it fires, outside it holds", () => {
+  test("the gate is the target's angular size at this range (40 m): inside it fires, outside it holds", () => {
     const base = desired()
+    const tol = gunFireTolerance(2.5, Math.hypot(40, 1.5))
     const withErr = (yawErr: number) => run((o) => {
       target(o)
       o.self.aim = [base[0] + yawErr, base[1]]
     })
-    assert.ok(COMBAT.maxFireAngleErrorRad > 0.1 && COMBAT.maxFireAngleErrorRad < 0.2)
-    assert.equal(withErr(COMBAT.maxFireAngleErrorRad * 0.8).fire[0], true)
-    assert.equal(withErr(COMBAT.maxFireAngleErrorRad * 1.3).fire[0], false)
-    assert.equal(withErr(-COMBAT.maxFireAngleErrorRad * 1.3).fire[0], false)
-    const o = cleanObs((x) => { x.self.pos = [...ME]; target(x); x.self.aim = [base[0] + COMBAT.maxFireAngleErrorRad * 0.8, base[1]] })
-    assert.ok(aimErrorRad(o.self.aim, base) <= COMBAT.maxFireAngleErrorRad)
+    assert.ok(tol < COMBAT.maxFireAngleErrorRad, "at 40 m the body is narrower than the old fixed 0.15 rad gate")
+    assert.equal(withErr(tol * 0.8).fire[0], true)
+    assert.equal(withErr(tol * 1.3).fire[0], false)
+    assert.equal(withErr(-tol * 1.3).fire[0], false)
   })
 
   test("no fire without ammo or mid-reload; an empty magazine starts a reload", () => {
@@ -150,11 +149,12 @@ describe("target selection and line of sight", () => {
 describe("NPC drones are a side dish, never a distraction", () => {
   const npc = (x: number): ActorObs => ({ id: 101, kind: "npc", pos: at(x, -20), vel: [0, 0, 0], aim: [0, 0], hp: 350, max_hp: 350 })
 
-  test("shoots a drone within 35 m when no enemy mech is visible", () => {
+  test("shoots a drone within 40 m when no enemy mech is visible", () => {
     assert.equal(run((o) => (o.mechs = [npc(10)])).hasTarget, true) // 30 m
   })
-  test("ignores a drone beyond 35 m", () => {
-    assert.equal(run((o) => (o.mechs = [npc(18)])).hasTarget, false) // 38 m
+  test("ignores a drone beyond 40 m", () => {
+    assert.equal(run((o) => (o.mechs = [npc(18)])).hasTarget, true) // 38 m: now in range
+    assert.equal(run((o) => (o.mechs = [npc(22)])).hasTarget, false) // 42 m
   })
   test("never shoots a drone while ANY enemy mech is visible, even one we cannot shoot", () => {
     // We stand at (-20, 5); the enemy mech is at (20, 5) behind building A (no shot), the drone is 10 m away in the open.
@@ -186,9 +186,9 @@ describe("slot 1 lightning", () => {
   test("range: out of the 45 m reach does not fire (the gun may still)", () => {
     assert.equal(withLightning(at(30, -20), 0).fire[1], false) // 50 m
   })
-  test("energy gate: at or below 15 never fires", () => {
-    assert.equal(withLightning(at(10, -20), 0, 15).fire[1], false)
-    assert.equal(withLightning(at(10, -20), 0, 15.5).fire[1], true)
+  test("energy gate: at or below 12 never fires", () => {
+    assert.equal(withLightning(at(10, -20), 0, 12).fire[1], false)
+    assert.equal(withLightning(at(10, -20), 0, 12.5).fire[1], true)
     assert.equal(withLightning(at(10, -20), 0, 5).fire[1], false)
   })
   test("no LOS: does not fire", () => {
@@ -214,12 +214,13 @@ describe("proactive reload", () => {
       g.reload = over.reload ?? 0
       o.mechs = over.mechs ?? []
     }).reload
-  test("<= 6 rounds and no enemy mech has LOS: reload", () => {
+  test("<= 7 rounds and no enemy mech has LOS: reload", () => {
+    assert.equal(ammo(7), true)
     assert.equal(ammo(6), true)
     assert.equal(ammo(1), true)
   })
-  test("7+ rounds or a full mag: keep it", () => {
-    assert.equal(ammo(7), false)
+  test("8+ rounds or a full mag: keep it", () => {
+    assert.equal(ammo(8), false)
     assert.equal(ammo(12), false)
   })
   test("not while already reloading", () => {

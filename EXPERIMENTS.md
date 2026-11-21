@@ -15,8 +15,8 @@ Every submission is a **single-variable experiment** (cap: 4 submissions per hou
 
 | Run | Commit | Score | Notes |
 | --- | --- | --- | --- |
-| v1 submission A | | | |
-| v1 submission B (same commit) | | | |
+| v1 submission A | 3fae0bf (BB-C7F0AB94) | **1.90** | Platform built the Dockerfile and passed check.py. 'wait 87 ms' shown on the page (meaning unconfirmed). |
+| v1 submission B (same commit) | _not run_ | | Skipped: we moved straight to Phase 2, so the noise threshold is still UNKNOWN. A Phase 2 delta smaller than ~0.3 cannot be told apart from luck. |
 | **Observed noise (abs gap)** | | | Keep threshold = ______ |
 
 ## Log
@@ -24,5 +24,7 @@ Every submission is a **single-variable experiment** (cap: 4 submissions per hou
 | Commit | Time (IST) | Single-Variable Change | Score | Delta | p99 Tick ms | Decision (Keep/Revert) | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | _(scaffold)_ | Sat 21 Nov | Phase 0: stub modules, inert bot (stands still, never fires) | not submitted | | 0.88 (pinned-core proxy, not Docker) | n/a | Pipeline proof only. First real row is Phase 1 v1. |
-| _(v1 candidate)_ | Sat 21 Nov | Phase 1 rules: zone safety, kiting, wall feeler, loot detour, gun lead + slew gate, lightning-only take, upgrade priority, defensive facing | | | 3.51 (pinned-core proxy, not Docker) | | Submit twice (same commit) for the noise calibration. |
+| 3fae0bf | BB-C7F0AB94, Fri 11:47 PM per the platform page | Phase 1 rules: zone safety, kiting, wall feeler, loot detour, gun lead + slew gate, lightning-only take, upgrade priority, defensive facing | **1.90** | +0.75 vs the 1.15 baseline | 3.51 (pinned-core proxy, not Docker) | **Baseline / Keep** | Platform built the Dockerfile and passed check.py first try. Tagged `best-known-good`. |
+| fe8bb4b (BB-FE20AABD, Sat 12:26 AM) | Sat 21 Nov | **Locomotion only**: tactical utility scorer (cover vs top-6 threats, FOV/weapon danger, crossfire, midpoint, mortar/bullet dodge, rim + shrink timing, wall-tangent escape, anti-stuck, latched boost) + warm-up 2 -> 300. Combat/Economy identical to 3fae0bf. | **1.75** | **-0.15** vs 1.90 | 21.6 (pinned-core proxy; unpinned 1.66). Platform 'wait 17 ms' (vs 87 ms for 3fae0bf). | **Revert (provisional)** | Inside the unknown noise band: not proof Phase 2 is worse. Do NOT pick as final. Next: resubmit 3fae0bf unchanged to measure noise. |
+| _(Combat v2 candidate, this commit)_ | Sat 21 Nov | **Combat + Economy only** on the 3fae0bf locomotion: distance-scaled gun gate, kill-confirm focus (HP first), strict regen hold (<35% HP, >75 m, >350 HP), laser hold/release state machine with gun weaving, lightning >12 energy, crate + drone farming, laser take/swap, supply-drop loot, new upgrade order. | | | 3.5 (pinned-core proxy; unpinned 0.72) | | Locomotion byte-identical to 3fae0bf. Practice opponents are one squad (shared vision, never fight each other), so kills matter more than our FFA intuition. |
 | | | | | | | | |

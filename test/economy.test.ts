@@ -18,16 +18,17 @@ describe("upgrade ranking and offer picking", () => {
     assert.deepEqual([...ECONOMY.upgradePriority].sort(), [...ids].sort(), "priority list and hello.config.upgrades must match exactly")
   })
 
-  test("survival and mobility outrank damage: armor > plating > nanites > servos > reactor > capacitor > weapons", () => {
+  test("survivability, then the DPS snowball, then regen/mobility: armor > plating > gun_rate > gun_damage > laser > nanites > servos", () => {
     const rank = (id: string): number => ECONOMY.upgradePriority.indexOf(id)
-    for (const [a, b] of [["armor", "plating"], ["plating", "nanites"], ["nanites", "servos"], ["servos", "reactor"], ["reactor", "capacitor"], ["capacitor", "gun_damage"], ["sensors", "gun_damage"]] as const) {
+    for (const [a, b] of [["armor", "plating"], ["plating", "gun_rate"], ["gun_rate", "gun_damage"], ["gun_damage", "laser_damage"], ["laser_damage", "laser_charge"], ["laser_charge", "nanites"], ["nanites", "servos"], ["servos", "gun_mag"], ["capacitor", "lightning_efficiency"], ["sensors", "mortar_reload"]] as const) {
       assert.ok(rank(a) < rank(b), `${a} should outrank ${b}`)
     }
   })
 
   test("picks the best-ranked choice by index; an offer always produces a pick", () => {
     assert.equal(bestUpgradeIndex([choice("gun_damage"), choice("armor"), choice("sensors")]), 1)
-    assert.equal(bestUpgradeIndex([choice("lightning_chain"), choice("gun_rate"), choice("jets")]), 2)
+    assert.equal(bestUpgradeIndex([choice("lightning_chain"), choice("gun_rate"), choice("jets")]), 1)
+    assert.equal(bestUpgradeIndex([choice("mortar_splash"), choice("sensors"), choice("jets")]), 1)
     const o = cleanObs((x) => (x.offer = { id: 1, expires: 99, choices: [choice("gun_velocity"), choice("plating"), choice("gun_mag")] }))
     assert.equal(decide(o).pick, 1)
   })
@@ -49,16 +50,18 @@ describe("weapon take rule: lightning only, into an empty slot, within reach", (
     assert.equal(decide(o).take, 8001)
   })
 
-  test("NEVER takes mortar or laser, even when they are right at our feet", () => {
-    const o = cleanObs((x) => (x.pickups = [pickup(8001, "mortar", [0.5, 0, 0]), pickup(8002, "laser", [1, 0, 0])]))
+  test("NEVER takes a mortar, even right at our feet, and it is never a loot target", () => {
+    const o = cleanObs((x) => (x.pickups = [pickup(8001, "mortar", [0.5, 0, 0])]))
     const out = decide(o)
     assert.equal(out.take, undefined)
-    assert.equal(out.lootTargets.length, 0, "mortar/laser pickups are not worth a detour either")
+    assert.equal(out.lootTargets.length, 0)
   })
 
-  test("picks lightning out of a mixed pile, and the nearest of several lightnings", () => {
-    const o = cleanObs((x) => (x.pickups = [pickup(8001, "mortar", [1, 0, 0]), pickup(8002, "lightning", [3, 0, 0]), pickup(8003, "lightning", [2, 0, 0]), pickup(8004, "laser", [0.5, 0, 0])]))
-    assert.equal(decide(o).take, 8003)
+  test("a mixed pile: the laser beats lightning even when farther; the nearest of several lightnings otherwise", () => {
+    const pile = cleanObs((x) => (x.pickups = [pickup(8001, "mortar", [1, 0, 0]), pickup(8002, "lightning", [0.5, 0, 0]), pickup(8004, "laser", [3, 0, 0])]))
+    assert.equal(decide(pile).take, 8004)
+    const two = cleanObs((x) => (x.pickups = [pickup(8002, "lightning", [3, 0, 0]), pickup(8003, "lightning", [2, 0, 0])]))
+    assert.equal(decide(two).take, 8003)
   })
 
   test("no take when slot 1 is occupied, or when we already hold lightning", () => {
