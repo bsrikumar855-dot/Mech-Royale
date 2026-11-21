@@ -9,7 +9,7 @@ import { NO_DEADLINE } from "../src/runtime/deadline.ts"
 import type { Observation, WeaponObs } from "../src/types/mechfight.ts"
 import type { MapQuery } from "../src/world/map.ts"
 import { WorldModel } from "../src/world/world.ts"
-import { cleanObs, enemy, fixtureHello, fixtureObs, HAS_ARENA, realMap, syntheticMap } from "./helpers.ts"
+import { cleanObs, enemy, fixtureHello, fixtureObs, HAS_ARENA, lightningWeapon, realMap, syntheticMap } from "./helpers.ts"
 
 const hello = fixtureHello()
 const mag = (v: readonly number[]): number => Math.hypot(v[0]!, v[1]!)
@@ -103,6 +103,29 @@ describe("A-D strafing with range control", () => {
     assert.ok(r.out.move[0] < -0.3)
     assert.equal(once((o) => (o.mechs = [enemy(5, [48, 0, 0], { weapons: ["gun", "lightning"] })])).mode, "backpedal")
     assert.equal(once((o) => (o.mechs = [enemy(5, [48, 0, 0])])).mode, "strafe")
+  })
+  describe("submission 30: holding lightning + healthy -> stand our ground in its own band", () => {
+    const withLightning = (o: Observation): void => void (o.self.weapons = [o.self.weapons[0] ?? null, lightningWeapon()])
+    test("healthy, holding lightning, a non-lightning enemy at 30 m (used to backpedal): no longer close", () => {
+      const r = once((o) => { withLightning(o); o.mechs = [enemy(5, [30, 0, 0])] })
+      assert.notEqual(r.mode, "backpedal")
+    })
+    test("still backs off point-blank (< 15 m), even holding lightning and healthy", () => {
+      const r = once((o) => { withLightning(o); o.mechs = [enemy(5, [10, 0, 0])] })
+      assert.equal(r.mode, "backpedal")
+    })
+    test("still backs off a lightning-wielding enemy (unchanged, mutual short range stays cautious)", () => {
+      const r = once((o) => { withLightning(o); o.mechs = [enemy(5, [30, 0, 0], { weapons: ["gun", "lightning"] })] })
+      assert.equal(r.mode, "backpedal")
+    })
+    test("not healthy enough (<= closeLootMinHpFrac): backpedal as before", () => {
+      const r = once((o) => { withLightning(o); o.self.hp = o.self.max_hp * 0.5; o.mechs = [enemy(5, [30, 0, 0])] })
+      assert.equal(r.mode, "backpedal")
+    })
+    test("not holding lightning: unaffected, still backpedals at 30 m", () => {
+      const r = once((o) => (o.mechs = [enemy(5, [30, 0, 0])]))
+      assert.equal(r.mode, "backpedal")
+    })
   })
   test("strafe direction reverses every 0.75-1.15 s, not on a constant period", () => {
     const r = new Runner()

@@ -132,7 +132,14 @@ export class EvasiveLocomotion implements Locomotion {
       dir = inward && perp && underFire ? norm(add(inward, perp, L.shrinkWeave)) : inward
     } else if (underFire && perp && b !== null) {
       const towardThreat: Vec2 = [Math.cos(b), Math.sin(b)]
-      const close = sn.enemies.some((e) => e.dist < (e.lightning ? L.closeLightningM : L.closeM))
+      // Submission 30: healthy and holding lightning -> stand our ground in its own band against a non-lightning
+      // enemy instead of backpedaling out of the one range our own weapon needs; still backs off point-blank or
+      // from an enemy that itself carries lightning (unchanged, more dangerous either way).
+      const lightningReady = hpFrac > L.closeLootMinHpFrac && self.weapons.some((w) => w?.kind === "lightning")
+      const close = sn.enemies.some((e) => {
+        if (lightningReady && !e.lightning && e.dist >= L.lightningHoldFloorM) return false
+        return e.dist < (e.lightning ? L.closeLightningM : L.closeM)
+      })
       const close18 = hpFrac > L.closeLootMinHpFrac && sn.losCount <= 1 ? this.pickLoot(world, inSafe, L.closeLootM) : null
       // v5 post-kill scoop: no shot line on us -> cubes up to 25 m; one shooter -> a cube within 14 m above 45% HP
       const scoopR = sn.losCount === 0 ? L.scoopNoLosM : sn.losCount === 1 && hpFrac > L.scoopOneLosMinHpFrac ? L.scoopOneLosM : 0

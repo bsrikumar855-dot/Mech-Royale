@@ -65,6 +65,11 @@ export const LOCOMOTION = {
   woundedHpFrac: 0.42,
   closeM: 42,
   closeLightningM: 52,
+  /** Submission 30: healthy and holding lightning (45 m range), don't backpedal from a non-lightning enemy just for
+   * being inside that range -- we want to be there, not flee it. Still backs off point-blank (this floor) or from
+   * an enemy that itself carries lightning (closeLightningM above, unchanged: a mutual short-range exchange still
+   * favors caution). Uses closeLootMinHpFrac as the "healthy enough" gate, same as the rest of this file. */
+  lightningHoldFloorM: 15,
   farM: 95,
   approachMinHpFrac: 0.65,
   /** Any move whose 4 m lookahead leaves the safe rim is bent back inward. */
