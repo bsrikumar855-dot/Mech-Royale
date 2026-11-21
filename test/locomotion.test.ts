@@ -127,6 +127,30 @@ describe("bullet, mortar and laser dodges", () => {
   test("a bullet that will miss by a wide margin does not snap anything", () => {
     assert.equal(once((o) => (o.projectiles = [{ id: 1, kind: "gun", pos: [100, 20, 5], vel: [-252, 0, 0] }])).sense.bulletEscape, null)
   })
+  test("movement-aware: a bullet that a STATIC check would flag is correctly cleared once our own velocity already carries us clear of it", () => {
+    // static-position check: ray passes 1 m north of our (unmoving) position -- would trigger. But we are
+    // already walking south at full speed, which the old static check ignored entirely; by the time the bullet
+    // arrives we have carried ourselves to a 5.6 m miss, outside radius+clearance (5 m), so no escape is needed.
+    const stationary = once((o) => { o.mechs = [enemy(5, [100, 0, 0])]; o.projectiles = [{ id: 1, kind: "gun", pos: [100, 1, 5], vel: [-252, 0, 0] }] })
+    assert.ok(stationary.sense.bulletEscape, "a static mech still needs to dodge this ray")
+    const movingClear = once((o) => {
+      o.mechs = [enemy(5, [100, 0, 0])]
+      o.self.vel = [0, -11.7, 0] // already walking south, away from the bullet's line
+      o.projectiles = [{ id: 1, kind: "gun", pos: [100, 1, 5], vel: [-252, 0, 0] }]
+    })
+    assert.equal(movingClear.sense.bulletEscape, null, "our own motion already clears this ray")
+  })
+  test("movement-aware: a bullet a STATIC check would clear is correctly flagged once our own velocity carries us into it", () => {
+    // static-position check: ray passes 6 m south, outside radius+clearance (5 m) -- the old check sees nothing.
+    // But we are moving south at 5 m/s, which the old check never considered; by the time the bullet arrives we
+    // have closed to a 4 m miss, inside the threshold, so this now (correctly) needs an escape.
+    const r = once((o) => {
+      o.mechs = [enemy(5, [100, 0, 0])]
+      o.self.vel = [0, -5, 0]
+      o.projectiles = [{ id: 1, kind: "gun", pos: [100, -6, 5], vel: [-252, 0, 0] }]
+    })
+    assert.ok(r.sense.bulletEscape, "our own motion carries us into a ray the static check would have missed")
+  })
   test("mortar: predicts the landing point and runs straight out of the splash with an emergency boost", () => {
     const r = once((o) => (o.projectiles = [{ id: 1, kind: "mortar", pos: [5, 0, 20], vel: [0, 0, 0] }]))
     assert.equal(r.mode, "mortar")
