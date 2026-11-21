@@ -27,5 +27,5 @@ export const NAV = {
   /** Fields kept at once (current + next destination). */
   maxFields: 3,
   /** Use the path length instead of the straight distance when deciding to start the zone run (ablation switch). */
-  pathUrgency: true,
+  pathUrgency: false,
 } as const
