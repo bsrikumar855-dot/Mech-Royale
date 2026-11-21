@@ -76,7 +76,7 @@ export const LOCOMOTION = {
    * different order: equal skill in expectation, different trajectories on the 48 fixed practice seeds. Scoring two such
    * variants measures how far chaos alone moves the score.
    */
-  timingSalt: 0,
+  timingSalt: 1,
 
   // ---- hops
   jumpMinS: 1.8,
