@@ -17,10 +17,6 @@
  *    or with an enemy within 18 m (half speed while charging).
  *  - Regen discipline: below 35% HP inside the zone, hold fire on enemies beyond 75 m that we cannot finish (> 350
  *    HP) so the out-of-combat regen (reset by dealing damage) can start. Keep facing them. Never in a 1v1 brawl.
- *  - EXPERIMENT (submission 18): ghostHold -- never land the finishing blow on an already-weak (<= 350 HP) enemy
- *    mech, gun/laser-start/lightning, regardless of our own HP (overrides the regen-hold finishable exception
- *    above). Testing an external hypothesis that not finishing weak hunters delays the squad's escalation; expected
- *    to regress given everything else in this file is built around finishing kills being worth more than it costs.
  *  - Lightning (if held): instant; LOS, range, inside the cone of the actual yaw, energy.
  *  - Safe crate farming: no enemy mech has LOS or is within 50 m, in the zone, > 85% HP (v14) -> gun the nearest crate.
  *    v14: drones too only above 85% HP unless one damaged us within npcSelfDefenseS (regen needs 5 s of no damage).
@@ -267,12 +263,6 @@ export class RuleCombat implements Combat {
     // Regen discipline (strict, never in a brawl): badly wounded in the zone -> no chip shots at distant, healthy enemies.
     const killable = (c: Cand): boolean => c.hp !== undefined && c.hp <= COMBAT.killableHp
     const regenHold = !!target && target.kind === "mech" && hpFrac < COMBAT.regenHoldHpFrac && self.in_zone && target.dist > COMBAT.regenHoldDistM && !killable(target)
-    // EXPERIMENT (submission 18, testing an external strategy write-up): never land the finishing blow on an
-    // already-weak enemy mech. Practice is a squad hunt that "hunts you weakest first, more as you thin them out" --
-    // the hypothesis is that NOT finishing one off keeps the squad's escalation from arriving sooner. This directly
-    // overrides the regen-hold "finishable exception" above (which exists precisely because finishing a kill was
-    // previously found worth more than the regen it costs): expect this to regress, and revert it if it does.
-    const ghostHold = !!target && target.kind === "mech" && killable(target)
 
     const fire: [boolean, boolean] = [false, false]
     let aim: Vec2 = idle.aim
@@ -281,7 +271,7 @@ export class RuleCombat implements Combat {
 
     const nearestMech = Math.min(Infinity, ...mechs.map((c) => c.dist))
     const laserCanStart =
-      !!laser && !!target && target.kind === "mech" && target.dist <= laserRange && (laser.cooldown ?? 0) <= 0 && !regenHold && !ghostHold && self.in_zone && nearestMech > COMBAT.laserMinStartDistM
+      !!laser && !!target && target.kind === "mech" && target.dist <= laserRange && (laser.cooldown ?? 0) <= 0 && !regenHold && self.in_zone && nearestMech > COMBAT.laserMinStartDistM
     const laserCharging = !!laser && (laser.charge ?? 0) > 0
 
     if (target) {
@@ -293,7 +283,7 @@ export class RuleCombat implements Combat {
       // The laser is hitscan: while it is (about to be) charging, aim at the centre, not the lead point.
       aim = laserCanStart || laserCharging ? aimAt(muzzle, target.com) : leadAim
       // Post-slew gate: the torso keeps slewing toward `aim` while the trigger is held, so judge where it will be.
-      if (gun && gunSlot >= 0 && gunReady(gun) && !regenHold && !ghostHold && target.dist <= gunRange && aimErrorRad(postSlewAim(world, aim), leadAim) <= gunFireTolerance(target.radius, target.dist)) {
+      if (gun && gunSlot >= 0 && gunReady(gun) && !regenHold && target.dist <= gunRange && aimErrorRad(postSlewAim(world, aim), leadAim) <= gunFireTolerance(target.radius, target.dist)) {
         fire[gunSlot as 0 | 1] = true
       }
       if (target.kind === "mech") this.lastLosTarget = { id: target.id, t: world.t }
@@ -321,7 +311,7 @@ export class RuleCombat implements Combat {
     if (lightning && ltSlot >= 0 && !regenHold && self.energy > COMBAT.lightningMinEnergy && self.energy >= stat(lightning, "energy")) {
       const near = pool.filter((c) => c.dist <= lightningRange).sort((x, y) => x.dist - y.dist)[0]
       const half = (stat(lightning, "cone_deg") * DEG) / 2
-      if (near && near.a && !killable(near) && Math.abs(angleDiff(self.aim[0], yawTo(self.pos[0], self.pos[1], near.a.pos[0], near.a.pos[1]))) <= half) fire[ltSlot as 0 | 1] = true
+      if (near && near.a && Math.abs(angleDiff(self.aim[0], yawTo(self.pos[0], self.pos[1], near.a.pos[0], near.a.pos[1]))) <= half) fire[ltSlot as 0 | 1] = true
     }
 
     // Safe crate farming: no enemy mech has LOS, none tracked nearby, inside the zone, healthy -> gun the nearest crate.

@@ -107,47 +107,12 @@ describe("regen hold-fire (strict: < 35% HP, in zone, > 75 m, not finishable)", 
     assert.equal(scene(60).fire[0], true)
     assert.equal(scene(30).fire[0], true)
   })
-  test("submission 18 (ghostHold): a finishable target (<= 350 HP) is now held, not finished, even in the old regen-hold scene", () => {
-    assert.equal(scene(100, { foeHp: 300 }).fire[0], false)
+  test("shoots a finishable target (<= 350 HP) even far away", () => {
+    assert.equal(scene(100, { foeHp: 300 }).fire[0], true)
   })
   test("above 35% HP, or outside the zone (no regen there anyway): keep shooting", () => {
     assert.equal(scene(100, { hpFrac: 0.4 }).fire[0], true)
     assert.equal(scene(100, { inZone: false }).fire[0], true)
-  })
-})
-
-describe("ghostHold (submission 18): never finish off an already-weak (<= 350 HP) enemy mech", () => {
-  test("gun holds fire on a killable target even at full HP, in a close brawl, aligned and ready -- but still tracks it", () => {
-    const desired = aimAt(MUZZLE, comOf(30, 0))
-    const out = fight((o) => {
-      o.self.hp = o.self.max_hp // not a regen-hold scene at all: this is ghostHold alone
-      o.self.aim = [...desired]
-      o.mechs = [enemy(5, [30, 0, 0], { hp: 300 })]
-    })
-    assert.equal(out.fire[0], false)
-    assert.equal(out.hasTarget, true)
-    assert.ok(Math.abs(out.aim[0] - desired[0]) < 0.02, "still faces/tracks the weak enemy")
-  })
-  test("a healthy (> 350 HP) enemy in the same scene is unaffected: still finished off normally", () => {
-    const desired = aimAt(MUZZLE, comOf(30, 0))
-    const out = fight((o) => {
-      o.self.hp = o.self.max_hp
-      o.self.aim = [...desired]
-      o.mechs = [enemy(5, [30, 0, 0], { hp: 351 })]
-    })
-    assert.equal(out.fire[0], true)
-  })
-  test("lightning holds on a killable near target even in cone/range/energy", () => {
-    const out = fight((o) => {
-      o.self.weapons = [o.self.weapons[0] ?? null, lightningWeapon()]
-      o.self.aim = [0, 0]
-      o.mechs = [enemy(5, [10, 0, 0], { hp: 200 })]
-    })
-    assert.equal(out.fire[1], false)
-  })
-  test("laser never starts a charge on a killable target", () => {
-    const out = fight((o) => { withLaser(o); o.mechs = [enemy(5, [100, 0, 0], { hp: 100 })] })
-    assert.equal(out.fire[1], false)
   })
 })
 
