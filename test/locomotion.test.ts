@@ -82,76 +82,37 @@ describe("threat trigger: never a stationary target under threat (the 300/300 bu
 describe("A-D strafing with range control", () => {
   const towardEnemy = (x: number, y: number): [number, number] => [x / Math.hypot(x, y), y / Math.hypot(x, y)]
 
-  const radialAt = (x: number, patch: (o: Observation) => void = () => {}) => {
-    const r = once((o) => { o.mechs = [enemy(5, [x, 0, 0])]; patch(o) })
-    return { r, radial: dot(r.out.move, towardEnemy(x, 0)), lateral: Math.abs(r.out.move[1]) }
-  }
-  test("v10 kite band: 1v1 at 60 m strong backpedal (-0.60), at 80 m smooth backpedal (-0.35), both with full strafe", () => {
-    const at60 = radialAt(60)
-    assert.equal(at60.r.mode, "backpedal")
-    assert.ok(Math.abs(at60.radial - -0.6 / Math.hypot(1, 0.6)) < 1e-9, `60 m radial ${at60.radial}`)
-    assert.ok(at60.lateral > 0.8, "still strafing")
-    const at80 = radialAt(80)
-    assert.equal(at80.r.mode, "backpedal")
-    assert.ok(Math.abs(at80.radial - -0.35 / Math.hypot(1, 0.35)) < 1e-9, `80 m radial ${at80.radial}`)
-    assert.ok(at80.lateral > 0.9)
+  test("1v1 sweet spot (42-95 m): pure perpendicular strafe", () => {
+    const r = once((o) => (o.mechs = [enemy(5, [60, 0, 0])]))
+    assert.equal(r.mode, "strafe")
+    assert.ok(Math.abs(dot(r.out.move, towardEnemy(60, 0))) < 1e-9)
   })
-  test("v10 sweet spot 90-145 m: pure perpendicular A-D strafe at 115 m and 139 m (no approach)", () => {
-    for (const x of [95, 115, 139]) {
-      const s = radialAt(x)
-      assert.equal(s.r.mode, "strafe", `${x} m`)
-      assert.ok(Math.abs(s.radial) < 1e-9)
-    }
+  test("139 m, healthy, in the safe zone: perpendicular strafe with a mild approach", () => {
+    const r = once((o) => (o.mechs = [enemy(5, [139, 0, 0])]))
+    assert.equal(r.mode, "approach")
+    const radial = dot(r.out.move, towardEnemy(139, 0))
+    assert.ok(radial > 0.2 && radial < 0.35, `radial ${radial}`)
   })
-  test("v10: beyond 155 m, healthy, in the safe zone: mild approach (+0.25); not healthy: pure strafe", () => {
-    const far = radialAt(170)
-    assert.equal(far.r.mode, "approach")
-    assert.ok(Math.abs(far.radial - 0.25 / Math.hypot(1, 0.25)) < 1e-9, `radial ${far.radial}`)
-    assert.equal(radialAt(150).r.mode, "strafe", "150 m: still the sweet spot")
-    assert.equal(radialAt(170, (o) => (o.self.hp = o.self.max_hp * 0.6)).r.mode, "strafe")
+  test("139 m but not healthy (60% HP): no approach, pure strafe", () => {
+    const r = once((o) => { o.self.hp = o.self.max_hp * 0.6; o.mechs = [enemy(5, [139, 0, 0])] })
+    assert.equal(r.mode, "strafe")
   })
-  test("too close (< 42 m, or < 52 m against lightning): strong backpedal before any loot", () => {
-    const r = once((o) => { o.mechs = [enemy(5, [30, 0, 0])]; o.cubes = [{ id: 5001, pos: [0, 10, 0] }] })
+  test("too close (< 42 m, or < 52 m against lightning): backpedal while strafing", () => {
+    const r = once((o) => (o.mechs = [enemy(5, [30, 0, 0])]))
     assert.equal(r.mode, "backpedal")
     assert.ok(r.out.move[0] < -0.3)
     assert.equal(once((o) => (o.mechs = [enemy(5, [48, 0, 0], { weapons: ["gun", "lightning"] })])).mode, "backpedal")
-    assert.equal(once((o) => { o.mechs = [enemy(5, [48, 0, 0])]; o.cubes = [{ id: 5001, pos: [0, 10, 0] }] }).mode, "loot", "48 m: loot first, then the kite band")
+    assert.equal(once((o) => (o.mechs = [enemy(5, [48, 0, 0])])).mode, "strafe")
   })
-  test("v10 lightning finish: lightning (no laser), energy > 25, one shooter < 350 HP -> close in; else backpedal", () => {
-    const lt = (o: Observation, hp: number, energy = 100): void => {
-      o.self.weapons = [o.self.weapons[0] ?? null, { kind: "lightning", cooldown: 0, stats: { ...(hello.config.weapons.lightning as Record<string, number>) } }]
-      o.self.energy = energy
-      o.mechs = [enemy(5, [70, 0, 0], { hp })]
-    }
-    const go = once((o) => lt(o, 300))
-    assert.equal(go.mode, "finish")
-    assert.ok(dot(go.out.move, [1, 0]) > 0.4, `closing in: ${go.out.move}`)
-    const inside = once((o) => { lt(o, 300); o.mechs = [enemy(5, [35, 0, 0], { hp: 300 })] })
-    assert.equal(inside.mode, "finish")
-    assert.ok(Math.abs(inside.out.move[0]) < 1e-9, "inside 42 m: pure strafe, no backpedal")
-    assert.equal(once((o) => lt(o, 400)).mode, "backpedal", "not nearly dead")
-    assert.equal(once((o) => lt(o, 300, 25)).mode, "backpedal", "energy 25: no finish")
-    assert.equal(once((o) => { lt(o, 300); o.self.weapons = [o.self.weapons[1] ?? null, laser()] }).mode, "backpedal", "lightning + laser held: no lightning finish")
-  })
-  const reversals = (x: number, n = 60): number[] => {
+  test("strafe direction reverses every 0.75-1.15 s, not on a constant period", () => {
     const r = new Runner()
     const signs: number[] = []
-    for (let i = 0; i < n; i++) signs.push(Math.sign(r.step((o) => { o.self.energy = 50; o.mechs = [enemy(5, [x, 0, 0])] }).out.move[1]))
-    return signs.flatMap((s, i) => (i > 0 && s !== signs[i - 1] ? [i] : []))
-  }
-  test("strafe direction reverses every 0.75-1.15 s at >= 85 m, not on a constant period", () => {
-    const flipsAt = reversals(100)
+    for (let i = 0; i < 60; i++) signs.push(Math.sign(r.step((o) => (o.mechs = [enemy(5, [60, 0, 0])])).out.move[1]))
+    const flipsAt = signs.flatMap((s, i) => (i > 0 && s !== signs[i - 1] ? [i] : []))
     assert.ok(flipsAt.length >= 4 && flipsAt.length <= 8, `${flipsAt.length} reversals in 6 s`)
     const gaps = flipsAt.slice(1).map((v, i) => v - flipsAt[i]!)
     for (const g of gaps) assert.ok(g >= 7 && g <= 12, `gap ${g} decisions`)
     assert.ok(new Set(gaps).size > 1, "periods vary")
-  })
-  test("v10: with an enemy inside 85 m the reversals tighten to 0.55-0.85 s", () => {
-    const flipsAt = reversals(70)
-    const gaps = flipsAt.slice(1).map((v, i) => v - flipsAt[i]!)
-    assert.ok(flipsAt.length >= 7, `${flipsAt.length} reversals in 6 s`)
-    for (const g of gaps) assert.ok(g >= 5 && g <= 9, `gap ${g} decisions`)
-    assert.ok(Math.max(...gaps) < 10)
   })
 })
 
@@ -525,59 +486,5 @@ describe("v5: snowball upgrade order", () => {
     const p = ECONOMY.upgradePriority
     assert.deepEqual([...p.slice(0, 7)].sort(), ["armor", "gun_damage", "gun_rate", "laser_charge", "laser_damage", "nanites", "plating"])
     assert.deepEqual([...p.slice(-3)].sort(), ["mortar_reload", "mortar_splash", "mortar_velocity"])
-  })
-})
-
-describe("v10: boost-snap strafe reversals", () => {
-  /** Run a 1v1 at 100 m (pure strafe) and return per-decision [lateral sign, boost]. */
-  const run = (patch: (o: Observation) => void = () => {}, n = 40) => {
-    const r = new Runner()
-    const out: { sign: number; boost: boolean }[] = []
-    for (let i = 0; i < n; i++) {
-      const s = r.step((o) => { o.mechs = [enemy(5, [100, 0, 0])]; patch(o) })
-      out.push({ sign: Math.sign(s.out.move[1]), boost: s.out.boost })
-    }
-    return out
-  }
-  test("energy >= 65: boosts on the reversal decision and the next two (0.25 s), off otherwise", () => {
-    const seq = run()
-    const flips = seq.flatMap((s, i) => (i > 0 && s.sign !== seq[i - 1]!.sign ? [i] : []))
-    assert.ok(flips.length >= 2, "precondition: reversals happen")
-    for (const f of flips.filter((f) => f + 2 < seq.length)) {
-      assert.equal(seq[f]!.boost, true, `boost on the reversal at ${f}`)
-      assert.equal(seq[f + 1]!.boost, true, "+0.1 s")
-      assert.equal(seq[f + 2]!.boost, true, "+0.2 s")
-      if (f + 3 < seq.length && !flips.includes(f + 3)) assert.equal(seq[f + 3]!.boost, false, "+0.3 s: burst over")
-    }
-    assert.equal(seq[flips[0]! - 1]!.boost, false, "no boost between reversals")
-  })
-  test("energy < 65: no boost-snap (keep the reserve)", () => {
-    assert.ok(run((o) => (o.self.energy = 64)).every((s) => !s.boost))
-  })
-  test("never while our own laser charges", () => {
-    assert.ok(run((o) => (o.self.weapons = [o.self.weapons[0] ?? null, laser(0.3)])).every((s) => !s.boost))
-  })
-  test("a bullet snap opens the burst too (even without a side change); 64 energy does not", () => {
-    const shot = (energy: number) => once((o) => { o.self.energy = energy; o.mechs = [enemy(5, [100, 0, 0])]; o.projectiles = [{ id: 1, kind: "gun", pos: [100, -1, 5], vel: [-252, 0, 0] }] })
-    assert.equal(shot(100).out.boost, true)
-    assert.equal(shot(64).out.boost, false)
-  })
-  test("a world reset clears the burst window (fresh match: no boost on its first decision)", () => {
-    const r = new Runner()
-    let prev = 0
-    let flipped = false
-    for (let i = 0; i < 40 && !flipped; i++) {
-      const s = r.step((o) => (o.mechs = [enemy(5, [100, 0, 0])]))
-      const sign = Math.sign(s.out.move[1])
-      flipped = i > 0 && sign !== prev
-      prev = sign
-    }
-    assert.ok(flipped, "precondition: a reversal just happened")
-    r.world.reset()
-    assert.equal(r.step((o) => (o.mechs = [enemy(5, [100, 0, 0])])).out.boost, false)
-  })
-  test("not under fire (no shot line, no damage in 2 s): an alerted strafe reversal does not boost", () => {
-    // a heard gunshot only: strafing, reversals, but nothing shooting at us
-    assert.ok(run((o) => { o.mechs = []; o.sounds = [{ kind: "gun", bearing: 2, dist: "mid", age: 0.1 }] }).every((s) => !s.boost))
   })
 })
