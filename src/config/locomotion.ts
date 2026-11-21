@@ -117,62 +117,6 @@ export const LOCOMOTION = {
   /** Smaller next circles than this: patrol around the current one instead. */
   patrolMinRadiusM: 20,
 
-  // ---- v4: 2v1+ corner slicing (only on crossfire / critically wounded ticks; max 8 probes x 3 enemies raycasts)
-  /** Slice when this many enemies have a shot line on us... */
-  sliceMinLosEnemies: 2,
-  /** ...or one does and we are below this HP fraction and it is not finishable (HP above sliceFinishableHp). */
-  sliceWoundedHpFrac: 0.42,
-  sliceFinishableHp: 300,
-  /** On a roof the wounded trigger is looser: step inward off the threatened edge sooner. */
-  sliceRoofWoundedHpFrac: 0.55,
-  sliceProbes: 8,
-  sliceProbeM: 12,
-  /** On a roof: probe this close (4-6 m inward), never past a drop. */
-  sliceRoofProbeM: 5,
-  /** Exposure is checked against at most this many of the nearest shot-line enemies. */
-  sliceMaxEnemies: 3,
-  /** Score = exposed * this - tie breakers (lower wins). */
-  sliceExposedWeight: 100,
-  sliceOutsideSafePenalty: 30,
-  sliceAwayWeight: 6,
-  sliceHeadingWeight: 3,
-  /** The previous slice heading counts for hysteresis this long. */
-  sliceHeadingMemoryS: 1,
-  /** Snap-behind-the-corner boost latch. */
-  sliceBoostStartEnergy: 28,
-  sliceBoostHoldEnergy: 14,
-
-  // ---- v4: ledge and rooftop climbing (jump, then jet = boost in the air, then steer onto the top)
-  /** Ledge clear: an obstacle ahead whose walkable top is above step_up and at most this far above our feet. */
-  ledgeMaxRiseM: 8,
-  ledgeMinEnergy: 30,
-  /** Probe this far ahead for the ledge edge, and aim the landing this far past the edge. */
-  ledgeProbeM: 3,
-  climbLandInsetM: 2.5,
-  /** Rooftop escape (heavy pressure): roof within 4-24 m above our feet, within 7 m, energy >= 55. */
-  roofMinRiseM: 4,
-  roofMaxRiseM: 24,
-  roofSearchM: [3.5, 7] as readonly number[],
-  roofSearchBearings: 8,
-  roofMinEnergy: 55,
-  roofPressureHpFrac: 0.5,
-  roofPressureNearM: 55,
-  /** Jet while below top + this; release (and steer on) once at top + climbReleaseAboveM. */
-  climbJetBelowAboveM: 0.4,
-  climbReleaseAboveM: 0.3,
-  /** After the release, keep steering onto the top this long. */
-  climbLandS: 0.5,
-  climbAbortEnergy: 8,
-  climbTimeoutS: 3.5,
-  /** Clock comparisons tolerate float drift in obs.t (10.8 arrives as 10.799999999999997). */
-  climbTimeEpsS: 1e-6,
-
-  // ---- v4: roof edge safety
-  /** Standing more than this above the terrain under us = on a roof. */
-  onRoofAboveTerrainM: 4,
-  /** A drop deeper than this ahead is treated like a wall by the feelers (strafe flips along the roof). */
-  roofEdgeDropM: 6,
-
   // ---- wall feeler
   feelerStepM: 4,
   steerAnglesDeg: [30, 60, 90, 120] as readonly number[],

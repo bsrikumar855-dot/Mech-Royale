@@ -7,7 +7,6 @@
 import { LOCOMOTION as L } from "../config/index.ts"
 import type { Vec2 } from "../types/mechfight.ts"
 import type { WorldModel } from "../world/world.ts"
-import { ClimbState } from "./climb.ts"
 
 /** Deterministic hash -> [0, 1). Timings vary per slot and per event, but replays are reproducible. */
 export function hash01(n: number): number {
@@ -38,18 +37,7 @@ export class LocoState {
   isBoosting = false
   patrolSign: 1 | -1 = 1
 
-  /** v4: ledge / rooftop climb state machine. */
-  readonly climb = new ClimbState()
-  /** v4: last corner-slice heading and when (hysteresis), and its own boost latch. */
-  sliceHeading: Vec2 | null = null
-  sliceT = Number.NEGATIVE_INFINITY
-  sliceBoosting = false
-
   reset(): void {
-    this.climb.reset()
-    this.sliceHeading = null
-    this.sliceT = Number.NEGATIVE_INFINITY
-    this.sliceBoosting = false
     this.lastTick = null
     this.lastPos = null
     this.strafeSign = 1
