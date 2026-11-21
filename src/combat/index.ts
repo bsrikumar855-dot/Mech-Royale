@@ -32,7 +32,6 @@ import { aimErrorRad, angleDiff, clamp, yawTo } from "../world/geom.ts"
 import type { MapQuery } from "../world/map.ts"
 import type { WorldModel } from "../world/world.ts"
 import { aimAt, leadPoint, projectAim } from "./aim.ts"
-import { mortarFireTolerance, mortarImpact, mortarSafeToFire, mortarSolve } from "./mortar.ts"
 import { pickThreatBearing } from "./threat.ts"
 
 const DEG = Math.PI / 180
@@ -220,11 +219,9 @@ export class RuleCombat implements Combat {
     const gunSlot = slotOf(self, "gun")
     const ltSlot = slotOf(self, "lightning")
     const lzSlot = slotOf(self, "laser")
-    const mzSlot = slotOf(self, "mortar")
     const gun = gunSlot >= 0 ? (self.weapons[gunSlot] as WeaponObs) : null
     const lightning = ltSlot >= 0 ? (self.weapons[ltSlot] as WeaponObs) : null
     const laser = lzSlot >= 0 ? (self.weapons[lzSlot] as WeaponObs) : null
-    const mortar = mzSlot >= 0 ? (self.weapons[mzSlot] as WeaponObs) : null
     const gunRange = gun ? stat(gun, "range") * COMBAT.rangeMargin : 0
     const lightningRange = lightning ? stat(lightning, "range") : 0
     const laserRange = laser ? stat(laser, "range") : 0
@@ -267,23 +264,6 @@ export class RuleCombat implements Combat {
     const killable = (c: Cand): boolean => c.hp !== undefined && c.hp <= COMBAT.killableHp
     const regenHold = !!target && target.kind === "mech" && hpFrac < COMBAT.regenHoldHpFrac && self.in_zone && target.dist > COMBAT.regenHoldDistM && !killable(target)
 
-    // Mortar (v1): a lob, not a flat shot, so it commits the torso to its own aim this tick instead of the gun's
-    // lead -- the gun's own slew gate then naturally fails to fire while the torso is pointed up, no extra guard
-    // needed. Only ever the SAME LOS mech target the rest of Combat picked (see combat/mortar.ts header).
-    let mortarPlan: { aim: Vec2; impact: Vec3 } | null = null
-    if (mortar && mzSlot >= 0 && target && target.kind === "mech" && !regenHold && (mortar.cooldown ?? 0) <= 0 && self.energy >= stat(mortar, "drain") && target.dist <= COMBAT.mortarMaxRangeM) {
-      const track = world.tracks.get(target.id)
-      const vel = track ? world.estimateVelocity(track) : (target.a?.vel ?? [0, 0, 0])
-      const speed = stat(mortar, "speed")
-      const gravity = stat(mortar, "gravity")
-      const ttl = stat(mortar, "ttl", 1)
-      const sol = mortarSolve({ muzzle, pos: target.com, vel, speed, gravity, maxTimeS: ttl, minPitch: world.rules.minPitch, maxPitch: world.rules.maxPitch })
-      if (sol) {
-        const impact = mortarImpact(muzzle, sol.aim, speed, gravity, sol.flightTimeS)
-        if (mortarSafeToFire(self.pos, impact, stat(mortar, "splash_radius"), COMBAT.mortarSafetyMarginM)) mortarPlan = { aim: sol.aim, impact }
-      }
-    }
-
     const fire: [boolean, boolean] = [false, false]
     let aim: Vec2 = idle.aim
     let hasTarget = false
@@ -297,20 +277,14 @@ export class RuleCombat implements Combat {
     if (target) {
       hasTarget = true
       moveConstraint = "FACE_TARGET"
-      if (mortarPlan) {
-        // The torso commits to the lob this tick: skip the gun's flat lead entirely (see the mortarPlan comment above).
-        aim = mortarPlan.aim
-        if (aimErrorRad(postSlewAim(world, aim), aim) <= mortarFireTolerance(stat(mortar as WeaponObs, "splash_radius"), target.dist)) fire[mzSlot as 0 | 1] = true
-      } else {
-        const track = world.tracks.get(target.id)
-        const vel = track ? world.estimateVelocity(track) : (target.a?.vel ?? [0, 0, 0])
-        const leadAim = gun ? aimAt(muzzle, leadPoint(muzzle, target.com, vel, stat(gun, "speed"))) : aimAt(muzzle, target.com)
-        // The laser is hitscan: while it is (about to be) charging, aim at the centre, not the lead point.
-        aim = laserCanStart || laserCharging ? aimAt(muzzle, target.com) : leadAim
-        // Post-slew gate: the torso keeps slewing toward `aim` while the trigger is held, so judge where it will be.
-        if (gun && gunSlot >= 0 && gunReady(gun) && !regenHold && target.dist <= gunRange && aimErrorRad(postSlewAim(world, aim), leadAim) <= gunFireTolerance(target.radius, target.dist)) {
-          fire[gunSlot as 0 | 1] = true
-        }
+      const track = world.tracks.get(target.id)
+      const vel = track ? world.estimateVelocity(track) : (target.a?.vel ?? [0, 0, 0])
+      const leadAim = gun ? aimAt(muzzle, leadPoint(muzzle, target.com, vel, stat(gun, "speed"))) : aimAt(muzzle, target.com)
+      // The laser is hitscan: while it is (about to be) charging, aim at the centre, not the lead point.
+      aim = laserCanStart || laserCharging ? aimAt(muzzle, target.com) : leadAim
+      // Post-slew gate: the torso keeps slewing toward `aim` while the trigger is held, so judge where it will be.
+      if (gun && gunSlot >= 0 && gunReady(gun) && !regenHold && target.dist <= gunRange && aimErrorRad(postSlewAim(world, aim), leadAim) <= gunFireTolerance(target.radius, target.dist)) {
+        fire[gunSlot as 0 | 1] = true
       }
       if (target.kind === "mech") this.lastLosTarget = { id: target.id, t: world.t }
     } else if (!mechHasLos && this.lastLosTarget && world.t - this.lastLosTarget.t < COMBAT.flickerAimHoldS) {

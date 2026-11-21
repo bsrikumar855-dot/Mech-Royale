@@ -4,10 +4,8 @@
  *
  * Rules (survival first: placement counts, kills do not):
  *  - pick: whenever an offer is pending, choose the best-ranked choice by ECONOMY.upgradePriority.
- *  - take: laser, lightning or mortar (in that preference order) into an EMPTY slot, within loot.pickup_radius
- *    (horizontal) and 4 m (vertical). Mortar is lowest preference: Combat only lobs it at an already-visible mech
- *    target within mortarMaxRangeM (see combat/mortar.ts), so it is a fine third weapon but not worth swapping a
- *    laser or lightning away for.
+ *  - take: laser or lightning (laser preferred) into an EMPTY slot, within loot.pickup_radius (horizontal) and 4 m
+ *    (vertical). Mortar is skipped on purpose (laser cook-off exposure, no ballistics yet).
  *  - swap: holding lightning, a laser in reach and no enemy mech within swapNoEnemyM -> take the laser, drop the
  *    lightning's slot. (The Arbiter independently refuses any drop of a slot whose laser is charging.)
  *  - lootTargets: visible cubes, pickups we would take or swap to, and uncontested supply drops landing within
