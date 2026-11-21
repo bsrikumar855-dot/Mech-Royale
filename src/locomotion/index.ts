@@ -21,7 +21,7 @@ import { sense, type Sensed } from "./sense.ts"
 import { LocoState } from "./state.ts"
 import { blockedAhead, steer } from "./steer.ts"
 
-export type Mode = "chase" | "hunt" | "mortar" | "outside" | "laserDodge" | "shrink" | "retreat" | "backpedal" | "approach" | "strafe" | "loot" | "rim" | "hold" | "patrol" | "idle"
+export type Mode = "hunt" | "mortar" | "outside" | "laserDodge" | "shrink" | "retreat" | "backpedal" | "approach" | "strafe" | "loot" | "rim" | "hold" | "patrol" | "idle"
 
 const add = (a: Vec2, b: Vec2, k: number): Vec2 => [a[0] + b[0] * k, a[1] + b[1] * k]
 const norm = (v: Vec2): Vec2 | null => unit2(v[0], v[1])
@@ -137,21 +137,7 @@ export class EvasiveLocomotion implements Locomotion {
       // v5 post-kill scoop: no shot line on us -> cubes up to 25 m; one shooter -> a cube within 14 m above 45% HP
       const scoopR = sn.losCount === 0 ? L.scoopNoLosM : sn.losCount === 1 && hpFrac > L.scoopOneLosMinHpFrac ? L.scoopOneLosM : 0
       const loot = close18 ?? (scoopR > 0 ? this.pickLoot(world, inSafe, scoopR, { cubesOnly: true }) : null)
-      // v12: the one shot-line shooter (1v1) and what we know of its HP
-      const duel = sn.losCount === 1 ? sn.enemies.find((e) => e.los) : undefined
-      const duelHp = duel ? world.tracks.get(duel.id)?.hp : undefined
-      const killChase =
-        !!duel &&
-        duelHp !== undefined &&
-        duelHp < L.killChaseMaxHp &&
-        hpFrac > L.killChaseMinHpFrac &&
-        inSafe(px, py) &&
-        duel.dist >= L.killChaseFloorM &&
-        !(duel.lightning && duel.dist < L.closeLightningM)
-      if (killChase) {
-        mode = "chase" // kill-confirm: delete the wounded hunter before it escapes or the next wave arrives
-        dir = norm(add(perp, towardThreat, L.killChaseBlend))
-      } else if (sn.losCount >= 2 || hpFrac < L.woundedHpFrac) {
+      if (sn.losCount >= 2 || hpFrac < L.woundedHpFrac) {
         mode = "retreat"
         dir = norm(add(perp, towardThreat, L.retreatBlend))
       } else if (close) {
@@ -161,10 +147,7 @@ export class EvasiveLocomotion implements Locomotion {
         mode = "loot"
         const tl = toward(loot.x, loot.y)
         dir = tl ? norm(add(tl, perp, L.lootWeave)) : perp
-      } else if (duel && sn.bearingDist > L.duelApproachBeyondM && hpFrac > L.duelMinHpFrac && inSafe(px, py)) {
-        mode = "approach" // v12 fast-kill 1v1: close from beyond 70 m (42-70 m stays pure strafe)
-        dir = norm(add(perp, towardThreat, L.duelApproachBlend))
-      } else if (!duel && sn.losCount === 0 && sn.bearingDist > L.farM && hpFrac > L.approachMinHpFrac && inSafe(px, py)) {
+      } else if (sn.bearingDist > L.farM && hpFrac > L.approachMinHpFrac && inSafe(px, py)) {
         mode = "approach"
         dir = norm(add(perp, towardThreat, L.approachBlend))
       } else {
@@ -216,7 +199,7 @@ export class EvasiveLocomotion implements Locomotion {
     }
 
     // keep evasive / loot / patrol moves inside the safe rim (the zone modes already point inward)
-    const rimChecked: readonly Mode[] = ["chase", "hunt", "retreat", "backpedal", "approach", "strafe", "loot", "patrol", "laserDodge"]
+    const rimChecked: readonly Mode[] = ["hunt", "retreat", "backpedal", "approach", "strafe", "loot", "patrol", "laserDodge"]
     if (dir && rimChecked.includes(mode)) {
       const m = Math.hypot(dir[0], dir[1])
       if (!inSafe(px + (dir[0] / m) * L.rimLookaheadM, py + (dir[1] / m) * L.rimLookaheadM)) {

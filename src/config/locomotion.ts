@@ -65,26 +65,8 @@ export const LOCOMOTION = {
   woundedHpFrac: 0.42,
   closeM: 42,
   closeLightningM: 52,
-  /** No shot line on us (damage / sound only): 6afa909's approach beyond farM, healthy, inside the safe rim. */
   farM: 95,
   approachMinHpFrac: 0.65,
-  /**
-   * v12 fast-kill 1v1 (practice = the house squad sends hunters one at a time; kills ARE placement there).
-   * Exactly one shot-line enemy, us above duelMinHpFrac, inside the safe rim, farther than duelApproachBeyondM:
-   * approach (+duelApproachBlend) on top of the full strafe. 42-70 m stays pure strafe; the 42 / 52 m floor stays.
-   */
-  duelApproachBeyondM: 70,
-  duelApproachBlend: 0.4,
-  duelMinHpFrac: 0.5,
-  /**
-   * v12 kill-confirm: that one shooter below killChaseMaxHp and us above killChaseMinHpFrac -> push +killChaseBlend
-   * down to killChaseFloorM (overriding the 42 m backpedal and the < 42% wounded retreat in a 1v1). Never vs an
-   * enemy holding lightning inside closeLightningM (its 45 m arc wins that brawl).
-   */
-  killChaseMaxHp: 450,
-  killChaseMinHpFrac: 0.35,
-  killChaseBlend: 0.5,
-  killChaseFloorM: 35,
   /** Any move whose 4 m lookahead leaves the safe rim is bent back inward. */
   rimLookaheadM: 4,
 
@@ -150,8 +132,8 @@ export const LOCOMOTION = {
   /** Nobody has a shot line on us (unseen shooter, stray projectile): scoop cubes up to this far. */
   scoopNoLosM: 25,
   /** One shooter has a line: still scoop a cube this close if we are above scoopOneLosMinHpFrac. */
-  scoopOneLosM: 18,
-  scoopOneLosMinHpFrac: 0.4,
+  scoopOneLosM: 14,
+  scoopOneLosMinHpFrac: 0.45,
 
   // ---- idle
   /** Below this HP, safe and unthreatened: stand still (silent) so the out-of-combat regen runs. */
