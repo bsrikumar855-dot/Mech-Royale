@@ -15,12 +15,11 @@
 import { LOCOMOTION as L } from "../config/index.ts"
 import type { Locomotion, LocomotionOutput, LootTarget, TickContext } from "../types/contracts.ts"
 import type { Vec2, Vec3 } from "../types/mechfight.ts"
-import { angleDiff, clamp, dist2d, unit2 } from "../world/geom.ts"
-import type { MapQuery } from "../world/map.ts"
+import { clamp, dist2d, unit2 } from "../world/geom.ts"
 import type { WorldModel } from "../world/world.ts"
 import { sense, type Sensed } from "./sense.ts"
 import { LocoState } from "./state.ts"
-import { blockedAhead, bodyOf, steer } from "./steer.ts"
+import { blockedAhead, steer } from "./steer.ts"
 
 export type Mode = "hunt" | "mortar" | "outside" | "laserDodge" | "shrink" | "retreat" | "backpedal" | "approach" | "strafe" | "loot" | "rim" | "hold" | "patrol" | "idle"
 
@@ -70,7 +69,6 @@ export class EvasiveLocomotion implements Locomotion {
     const radius = world.selfStat("radius", world.rules.radius)
     const sn = sense(world, map, radius)
     this.lastSense = sn
-    S.threats.ingest(world) // v11: sightings + weapon sounds, decaying over threatDecayS
 
     // ---- zone geometry
     const cur = world.zoneAt(t)
@@ -149,25 +147,9 @@ export class EvasiveLocomotion implements Locomotion {
         mode = "loot"
         const tl = toward(loot.x, loot.y)
         dir = tl ? norm(add(tl, perp, L.lootWeave)) : perp
-      } else if (sn.bearingDist > L.farM) {
-        // v11: no voluntary chase of a healthy bot. Finish exception: ONE shooter nearly dead, us healthy, in the rim.
-        const shooter = sn.losCount === 1 ? sn.enemies.find((e) => e.los) : undefined
-        const shooterHp = shooter ? world.tracks.get(shooter.id)?.hp : undefined
-        if (shooterHp !== undefined && shooterHp < L.finishMaxHp && hpFrac > L.finishMinHpFrac && inSafe(px, py)) {
-          mode = "approach"
-          dir = norm(add(perp, towardThreat, L.finishBlend))
-        } else {
-          mode = "strafe"
-          dir = perp
-          // near the centre: drift the strafe toward the quiet rim sector (out of the mosh pit), never forward
-          const rc = this.rimCircle(world, cur.center, cur.radius, nextC, z.next_radius)
-          if (dist2d(px, py, rc.c[0], rc.c[1]) < rc.R * L.rimStrafeBiasInsideFrac) {
-            const pick = this.pickRimSector(world, map, inSafe, cur, rc)
-            const out = pick ? toward(pick.x, pick.y) : null
-            // never a bias toward the shooter (that would be a chase by another name)
-            if (out && out[0] * towardThreat[0] + out[1] * towardThreat[1] < 0) dir = norm(add(perp, out, L.rimStrafeBias)) ?? perp
-          }
-        }
+      } else if (sn.bearingDist > L.farM && hpFrac > L.approachMinHpFrac && inSafe(px, py)) {
+        mode = "approach"
+        dir = norm(add(perp, towardThreat, L.approachBlend))
       } else {
         mode = "strafe"
         dir = perp
@@ -181,7 +163,7 @@ export class EvasiveLocomotion implements Locomotion {
         self.in_zone &&
         inSafe(px, py) &&
         (self.cubes < L.huntCubeCap || !holdsLaser)
-      const loot = this.pickLoot(world, inSafe, Infinity, { hunt: huntOpen, threatAware: true })
+      const loot = this.pickLoot(world, inSafe, Infinity, { hunt: huntOpen })
       if (loot && loot.standoff !== undefined && loot.com) {
         // drone / crate: walk in until Combat has a shot line within the stand-off, then hold still while it shoots
         mode = "hunt"
@@ -212,7 +194,7 @@ export class EvasiveLocomotion implements Locomotion {
         mode = "hold" // wounded, safe and quiet: let the regen run
       } else {
         mode = "patrol"
-        dir = this.rimPatrol(world, map, inSafe, cur, this.rimCircle(world, cur.center, cur.radius, nextC, z.next_radius))
+        dir = this.patrol(world, cur.center, cur.radius, nextC, z.next_radius)
       }
     }
 
@@ -254,7 +236,7 @@ export class EvasiveLocomotion implements Locomotion {
    * `hunt` (the v5 snowball gate is open): longer laser / drop / cube reach, plus NPC drones and crates as targets that
    * we approach to a stand-off so Combat shoots them. `cubesOnly`: the post-kill scoop under fire.
    */
-  private pickLoot(world: WorldModel, inSafe: (x: number, y: number) => boolean, maxDist: number, opts: { hunt?: boolean; cubesOnly?: boolean; threatAware?: boolean } = {}): LootPick | null {
+  private pickLoot(world: WorldModel, inSafe: (x: number, y: number) => boolean, maxDist: number, opts: { hunt?: boolean; cubesOnly?: boolean } = {}): LootPick | null {
     const obs = world.obs!
     const self = world.self
     const [px, py] = self.pos
@@ -265,13 +247,7 @@ export class EvasiveLocomotion implements Locomotion {
     const consider = (x: number, y: number, kind: string, range: number, ring?: number, target?: { com: Vec3; standoff: number }): void => {
       const d = dist2d(px, py, x, y)
       if (d > Math.min(range, maxDist) || !inSafe(x, y)) return
-      let value = (L.lootBase[kind] ?? L.huntBase[kind] ?? 0) / (1 + d / L.lootHalfValueM)
-      if (opts.threatAware) {
-        // v11: prefer the quiet side; never walk up to a drone / crate next to a recent sighting or gunfire
-        const threats = this.state.threats
-        if ((kind === "npc" || kind === "crate") && threats.near(x, y, L.lootThreatSkipM, world.t)) return
-        value /= 1 + L.lootThreatWeight * threats.score(x, y, world.t)
-      }
+      const value = (L.lootBase[kind] ?? L.huntBase[kind] ?? 0) / (1 + d / L.lootHalfValueM)
       if (best && value <= best.value) return
       const pick: LootPick = { x, y, kind, dist: d, value }
       if (ring !== undefined) pick.ringRadius = ring
@@ -308,105 +284,19 @@ export class EvasiveLocomotion implements Locomotion {
     return best
   }
 
-  /** The circle the rim patrol works on: the next one (large enough), else the current one. */
-  private rimCircle(_world: WorldModel, curC: readonly number[], curR: number, nextC: Vec2, nextR: number): { c: Vec2; R: number } {
-    return nextR >= L.patrolMinRadiusM ? { c: nextC, R: nextR } : { c: [curC[0] as number, curC[1] as number], R: curR }
-  }
-
-  /**
-   * v11 quiet rim sector: rimSectors candidates around rc; each uses the outermost of rimFracs that lies inside the
-   * safe rim, rimMarginM inside the current radius, in bounds and walkable. Score = threat * rimThreatWeight + arc
-   * travel (rad) * rimTravelWeight, minus rimHysteresis for the committed sector. O(sectors * (fracs + threat entries)).
-   */
-  pickRimSector(
-    world: WorldModel,
-    map: MapQuery | null,
-    inSafe: (x: number, y: number) => boolean,
-    cur: { center: readonly number[]; radius: number },
-    rc: { c: Vec2; R: number },
-  ): { k: number; x: number; y: number; r: number } | null {
-    const S = this.state
-    const t = world.t
+  /** Healthy and idle: circle the next zone's mid band so we keep moving and keep finding loot. */
+  private patrol(world: WorldModel, curC: readonly number[], curR: number, nextC: Vec2, nextR: number): Vec2 | null {
     const [px, py] = world.self.pos
-    const thUs = Math.atan2(py - rc.c[1], px - rc.c[0])
-    const body = bodyOf(world)
-    // falloff scaled to the circle: on a 500 m circle a fight 60 m from the centre still marks its side of the rim
-    const scale = Math.max(L.threatScaleM, L.rimThreatScaleFrac * rc.R)
-    let best: { k: number; x: number; y: number; r: number } | null = null
-    let bestScore = Infinity
-    for (let k = 0; k < L.rimSectors; k++) {
-      const a = (k / L.rimSectors) * Math.PI * 2
-      let q: { x: number; y: number; r: number } | null = null
-      for (const f of L.rimFracs) {
-        const r = f * rc.R
-        const x = rc.c[0] + Math.cos(a) * r
-        const y = rc.c[1] + Math.sin(a) * r
-        if (!inSafe(x, y) || dist2d(x, y, cur.center[0] as number, cur.center[1] as number) > cur.radius - L.rimMarginM) continue
-        if (map) {
-          const bd = map.bounds
-          if (x < bd.minX + body.radius || x > bd.maxX - body.radius || y < bd.minY + body.radius || y > bd.maxY - body.radius) continue
-          if (map.isBlockedAt(x, y, map.heightAt(x, y), body)) continue
-        }
-        q = { x, y, r }
-        break
-      }
-      if (!q) continue
-      const score = S.threats.score(q.x, q.y, t, scale) * L.rimThreatWeight + Math.abs(angleDiff(thUs, a)) * L.rimTravelWeight - (k === S.rimSector ? L.rimHysteresis : 0)
-      if (score < bestScore) {
-        bestScore = score
-        best = { k, ...q }
-      }
-    }
-    if (best) S.rimSector = best.k
-    return best
-  }
-
-  /**
-   * v11 healthy idle patrol on the quiet outer rim. Far around the circle (> rimArcDirectRad): follow the rim arc
-   * (tangent + radial hold at the sector radius), never across the centre; the arc side is chosen once per sector by
-   * arc length + threat at the arc midpoint. Close: walk to the sector point. Arrived: wander +-rimWanderRad along the
-   * rim (never a sitting duck). No walkable sector: circle at the middle rim radius.
-   */
-  private rimPatrol(
-    world: WorldModel,
-    map: MapQuery | null,
-    inSafe: (x: number, y: number) => boolean,
-    cur: { center: readonly number[]; radius: number },
-    rc: { c: Vec2; R: number },
-  ): Vec2 | null {
-    const S = this.state
-    const t = world.t
-    const [px, py] = world.self.pos
-    const d = dist2d(px, py, rc.c[0], rc.c[1])
-    const pick = this.pickRimSector(world, map, inSafe, cur, rc)
-    const rr = pick ? pick.r : (L.rimFracs[1] ?? 0.83) * rc.R
-    if (d < 1e-6) return pick ? norm([pick.x - px, pick.y - py]) : [1, 0]
-    const u: Vec2 = [(px - rc.c[0]) / d, (py - rc.c[1]) / d]
-    const radial = clamp((rr - d) / Math.max(1, L.rimRadialScaleFrac * rc.R), -1, 1)
-    const along = (sign: 1 | -1): Vec2 | null => norm(add([-u[1] * sign, u[0] * sign], u, radial))
-    if (!pick) return along(S.patrolSign)
-    const thUs = Math.atan2(u[1], u[0])
-    const thP = Math.atan2(pick.y - rc.c[1], pick.x - rc.c[0])
-    const delta = angleDiff(thUs, thP)
-    if (dist2d(px, py, pick.x, pick.y) <= L.rimArriveM) {
-      // wander along the rim around the sector point, turning back past +-rimWanderRad
-      if (angleDiff(thP, thUs) * S.patrolSign > L.rimWanderRad) S.patrolSign = S.patrolSign === 1 ? -1 : 1
-      return along(S.patrolSign)
-    }
-    if (Math.abs(delta) > L.rimArcDirectRad) {
-      if (S.rimArcFor !== pick.k || S.rimArcSign === 0) {
-        // choose the arc side once per sector: shorter arc vs quieter arc (threat at each side's midpoint)
-        const side = (sign: 1 | -1): number => {
-          const len = sign === Math.sign(delta) ? Math.abs(delta) : 2 * Math.PI - Math.abs(delta)
-          const mid = thUs + (sign * len) / 2
-          return len * L.rimTravelWeight + S.threats.score(rc.c[0] + Math.cos(mid) * rr, rc.c[1] + Math.sin(mid) * rr, t, Math.max(L.threatScaleM, L.rimThreatScaleFrac * rc.R)) * L.rimThreatWeight
-        }
-        S.rimArcSign = side(1) <= side(-1) ? 1 : -1
-        S.rimArcFor = pick.k
-      }
-      return along(S.rimArcSign === -1 ? -1 : 1)
-    }
-    return norm([pick.x - px, pick.y - py])
+    const useNext = nextR >= L.patrolMinRadiusM
+    const c: Vec2 = useNext ? nextC : [curC[0] as number, curC[1] as number]
+    const R = useNext ? nextR : curR
+    const d = dist2d(px, py, c[0], c[1])
+    if (d < 1e-6) return [1, 0]
+    const u: Vec2 = [(px - c[0]) / d, (py - c[1]) / d]
+    const tangent: Vec2 = [-u[1] * this.state.patrolSign, u[0] * this.state.patrolSign]
+    const mid = ((L.patrolInnerFrac + L.patrolOuterFrac) / 2) * R
+    const radial = clamp((mid - d) / Math.max(1, 0.2 * R), -1, 1)
+    return norm(add(tangent, u, radial))
   }
 }
 

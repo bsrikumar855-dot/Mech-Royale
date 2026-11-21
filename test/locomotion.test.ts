@@ -87,10 +87,11 @@ describe("A-D strafing with range control", () => {
     assert.equal(r.mode, "strafe")
     assert.ok(Math.abs(dot(r.out.move, towardEnemy(60, 0))) < 1e-9)
   })
-  test("v11: 139 m vs a healthy enemy, even healthy ourselves: no approach (never chase)", () => {
+  test("139 m, healthy, in the safe zone: perpendicular strafe with a mild approach", () => {
     const r = once((o) => (o.mechs = [enemy(5, [139, 0, 0])]))
-    assert.equal(r.mode, "strafe")
-    assert.ok(dot(r.out.move, towardEnemy(139, 0)) <= 0.05)
+    assert.equal(r.mode, "approach")
+    const radial = dot(r.out.move, towardEnemy(139, 0))
+    assert.ok(radial > 0.2 && radial < 0.35, `radial ${radial}`)
   })
   test("139 m but not healthy (60% HP): no approach, pure strafe", () => {
     const r = once((o) => { o.self.hp = o.self.max_hp * 0.6; o.mechs = [enemy(5, [139, 0, 0])] })
@@ -296,10 +297,11 @@ describe("idle: patrol when healthy, silent regen hold when wounded", () => {
   test("wounded but a gun was heard: strafe, not hold", () => {
     assert.equal(once((o) => { o.self.hp = o.self.max_hp * 0.7; o.sounds = [{ kind: "gun", bearing: 2, dist: "near", age: 0.1 }] }).mode, "strafe")
   })
-  test("v11 patrol works the outer rim: from 15% it heads out, beyond 95% it comes back in", () => {
+  test("patrol stays in the next circle's 40-75% band", () => {
     const at = (x: number) => once((o) => { o.self.pos = [x, 0, 0]; o.zone = { center: [0, 0], radius: 500, next_center: [0, 0], next_radius: 200, shrink_start: 1e6, shrink_end: 1e6 + 1, dps: 20 } }).out.move
-    assert.ok(at(30)[0] > 0.9, "15%: out toward the (east, nearest) rim sector")
-    assert.ok(at(190)[0] < 0, "95%: back inside the 78-88% band")
+    assert.ok(at(30)[0] > 0, "too far in (15%): drift outward")
+    assert.ok(at(190)[0] < 0, "too far out (95%): drift inward")
+    assert.ok(Math.abs(at(115)[0]) < 0.05, "in the band: tangential")
   })
 })
 
@@ -484,176 +486,5 @@ describe("v5: snowball upgrade order", () => {
     const p = ECONOMY.upgradePriority
     assert.deepEqual([...p.slice(0, 7)].sort(), ["armor", "gun_damage", "gun_rate", "laser_charge", "laser_damage", "nanites", "plating"])
     assert.deepEqual([...p.slice(-3)].sort(), ["mortar_reload", "mortar_splash", "mortar_velocity"])
-  })
-})
-
-// ------------------------------------------------------------------ v11: macro quiet rim + threat map + no chase
-const ring = (o: Observation, c: [number, number], nextR: number, curR = 500): void => {
-  o.zone = { center: [c[0], c[1]], radius: curR, next_center: [c[0], c[1]], next_radius: nextR, shrink_start: 1e6, shrink_end: 1e6 + 1, dps: 20 }
-}
-const gunSound = (bearing: number, dist: "near" | "mid" | "far" = "mid") => ({ kind: "gun", bearing, dist, age: 0.1 })
-
-describe("v11: decaying threat map", () => {
-  test("ingests enemy sightings (one entry per id, updated in place) and weapon sounds at bucket range", () => {
-    const r = new Runner()
-    r.step((o) => { o.mechs = [enemy(5, [150, 0, 0])]; o.sounds = [gunSound(Math.PI / 2, "mid"), { kind: "step", bearing: 0, dist: "near", age: 0.1 }] })
-    const e = r.loco.state.threats.entries
-    assert.equal(e.length, 2, "the enemy + the gun sound (footsteps ignored)")
-    const snd = e.find((x) => x.id === null)!
-    assert.ok(Math.abs(snd.x) < 1e-9 && Math.abs(snd.y - L.threatSoundRangeM["mid"]!) < 1e-9, "mid gun sound placed 110 m north")
-    r.step((o) => (o.mechs = [enemy(5, [140, 0, 0])]))
-    assert.equal(r.loco.state.threats.entries.filter((x) => x.id === 5).length, 1, "same id: updated, not duplicated")
-    assert.equal(r.loco.state.threats.entries.find((x) => x.id === 5)!.x, 140)
-  })
-  test("decays to nothing after 12 s and is capped at 16 entries", () => {
-    const r = new Runner()
-    r.step((o) => (o.sounds = [gunSound(0)]))
-    const tm = r.loco.state.threats
-    const s0 = tm.score(110, 0, 10.05)
-    assert.ok(s0 > 0.5)
-    assert.ok(Math.abs(tm.score(110, 0, 16.05) - s0 / 2) < 0.02, "half after 6 s")
-    r.t += 12.5
-    r.step()
-    assert.equal(tm.entries.length, 0, "gone after 12 s")
-    const many = new Runner()
-    many.step((o) => (o.sounds = Array.from({ length: 25 }, (_, k) => gunSound(k * 0.2))))
-    assert.equal(many.loco.state.threats.entries.length, L.threatMapCap)
-  })
-  test("cleared on a world reset (resetCount) and on a backwards tick", () => {
-    const r = new Runner()
-    r.step((o) => (o.sounds = [gunSound(0)]))
-    r.world.reset()
-    r.step()
-    assert.equal(r.loco.state.threats.entries.length, 0)
-    const b = new Runner()
-    b.step((o) => (o.sounds = [gunSound(0)]))
-    b.t = 1
-    b.step()
-    assert.equal(b.loco.state.threats.entries.length, 0)
-  })
-})
-
-describe("v11: quiet outer-rim patrol", () => {
-  const C: [number, number] = [0, 0]
-  const R = 200
-  test("enemy sightings on the east: patrol picks a walkable west rim sector at 78-88% of the next radius", () => {
-    const r = new Runner()
-    r.step((o) => { ring(o, C, R); o.mechs = [enemy(5, [150, 0, 0]), enemy(6, [120, 60, 0])] })
-    r.t += 6 // sightings out of vision memory (5 s), still on the 12 s threat map
-    const p = r.step((o) => ring(o, C, R))
-    assert.equal(p.mode, "patrol")
-    const k = r.loco.state.rimSector!
-    const a = (k / L.rimSectors) * Math.PI * 2
-    assert.ok(Math.cos(a) < -0.4, `west-ish sector, got ${k} (${a} rad)`)
-    assert.ok(p.out.move[0] < -0.4, `heads west-ish from the centre: ${p.out.move}`)
-  })
-  test("gunfire sounds alone (no sighting) also push the patrol to the quiet side", () => {
-    const r = new Runner()
-    r.step((o) => { ring(o, C, R); o.sounds = [gunSound(0, "mid"), gunSound(0.3, "mid")] })
-    r.t += 3 // past the 2 s sound alert, still on the threat map
-    const p = r.step((o) => ring(o, C, R))
-    assert.equal(p.mode, "patrol")
-    assert.ok(Math.cos((r.loco.state.rimSector! / L.rimSectors) * Math.PI * 2) < -0.4)
-  })
-  test("never the centre: the chosen point sits in the 78-88% band and inside the current safe rim", () => {
-    const r = new Runner()
-    const p = r.step((o) => ring(o, C, R))
-    assert.equal(p.mode, "patrol")
-    const pick = r.loco.pickRimSector(r.world, null, () => true, { center: C, radius: 500 }, { c: C, R })!
-    const d = Math.hypot(pick.x, pick.y)
-    assert.ok(d >= 0.78 * R - 1e-9 && d <= 0.88 * R + 1e-9, `rim band: ${d}`)
-    // a current zone barely bigger than the next circle forces the inner fraction (rimMarginM inside the radius)
-    const tight = r.loco.pickRimSector(r.world, null, (x, y) => Math.hypot(x, y) <= 0.85 * 200, { center: C, radius: 200 }, { c: C, R })!
-    assert.ok(Math.hypot(tight.x, tight.y) <= 200 - L.rimMarginM && Math.hypot(tight.x, tight.y) <= 0.85 * 200 + 1e-9)
-    // a small 40 m zone: the 8 m storm margin (32 m) is stricter than the 85% safe rim (34 m) -> the 78% radius
-    const small = r.loco.pickRimSector(r.world, null, (x, y) => Math.hypot(x, y) <= 0.85 * 40, { center: C, radius: 40 }, { c: C, R: 40 })!
-    assert.ok(Math.hypot(small.x, small.y) <= 40 - L.rimMarginM + 1e-9, `inside radius - margin: ${Math.hypot(small.x, small.y)}`)
-  })
-  test("sectors whose rim points are inside a building are skipped (synthetic building A)", () => {
-    // circle centred at (-20, 5), R 30: the east sector (angle 0) lands inside building A at every rim fraction
-    const map = syntheticMap()
-    const r = new Runner(map)
-    r.step((o) => { o.self.pos = [-20, 5, -2]; ring(o, [-20, 5], 30) })
-    r.loco.state.threats.entries.push({ x: -50, y: 5, t: r.t, w: 1, id: null }) // loud west: east would win if walkable
-    const pick = r.loco.pickRimSector(r.world, map, () => true, { center: [-20, 5], radius: 500 }, { c: [-20, 5], R: 30 })!
-    assert.notEqual(pick.k, 0)
-    assert.equal(map.isBlockedAt(pick.x, pick.y, map.heightAt(pick.x, pick.y), { radius: 2.5, height: 9, stepUp: 1.2 }), false)
-  })
-  test("hysteresis: a committed sector is kept against a marginally better one", () => {
-    const r = new Runner()
-    r.step((o) => ring(o, C, R))
-    const loco = r.loco
-    const at = () => loco.pickRimSector(r.world, null, () => true, { center: C, radius: 500 }, { c: C, R })!.k
-    assert.equal(at(), 0, "from the centre with no threats: the first sector")
-    // a faint threat right at sector 0: it scores 12, its neighbours 7.6 (better, but by less than the 15 hysteresis)
-    loco.state.threats.entries.push({ x: 0.88 * R, y: 0, t: r.world.t, w: 0.12, id: null })
-    assert.equal(at(), 0, "committed: kept")
-    loco.state.rimSector = null
-    assert.notEqual(at(), 0, "control: uncommitted, the quieter neighbour wins")
-  })
-  test("rotating north -> south around a threat at the centre follows the rim arc, never across the centre", () => {
-    const r = new Runner()
-    r.step((o) => { o.self.pos = [0, 170, 0]; ring(o, C, R); o.mechs = [enemy(5, [0, 140, 0]), enemy(6, [0, 0, 0])] })
-    r.t += 6
-    const p = r.step((o) => { o.self.pos = [0, 170, 0]; ring(o, C, R) })
-    assert.equal(p.mode, "patrol")
-    const k = r.loco.state.rimSector!
-    assert.ok(Math.sin((k / L.rimSectors) * Math.PI * 2) < -0.4, `a southern sector: ${k}`)
-    assert.ok(Math.abs(p.out.move[0]) > 0.9, `tangential along the rim: ${p.out.move}`)
-    assert.ok(p.out.move[1] > -0.3, "not straight down through the centre")
-  })
-})
-
-describe("v11: no voluntary chase of healthy bots", () => {
-  const radial = (x: number, patch: (o: Observation) => void = () => {}) => {
-    const r = once((o) => { o.mechs = [enemy(5, [x, 0, 0], { hp: 1000 })]; patch(o) })
-    return { r, radial: dot(r.out.move, [1, 0]) }
-  }
-  test("1v1 at 115 m vs a 1000 HP enemy: no forward approach (the centre drift points away)", () => {
-    const s = radial(115)
-    assert.equal(s.r.mode, "strafe")
-    assert.ok(s.radial <= 0.05, `radial ${s.radial}`)
-  })
-  test("near the centre the >95 m strafe drifts toward the quiet rim (away from the shooter)", () => {
-    assert.ok(radial(115).radial < -0.1)
-  })
-  test("1v1 at 115 m vs a 300 HP enemy while healthy: forward push (+0.35) to finish", () => {
-    const s = radial(115, (o) => (o.mechs = [enemy(5, [115, 0, 0], { hp: 300 })]))
-    assert.equal(s.r.mode, "approach")
-    assert.ok(Math.abs(s.radial - 0.35 / Math.hypot(1, 0.35)) < 1e-9, `radial ${s.radial}`)
-    assert.notEqual(radial(115, (o) => { o.self.hp = 0.5 * o.self.max_hp; o.mechs = [enemy(5, [115, 0, 0], { hp: 300 })] }).r.mode, "approach", "us at 50%: no push")
-  })
-})
-
-describe("v11: threat-aware farming", () => {
-  test("prefers a quiet crate over a closer one 40 m from fresh gunfire", () => {
-    const r = once((o) => {
-      o.self.cubes = 0
-      o.sounds = [gunSound(0, "mid")] // ~ (110, 0)
-      o.crates = [{ id: 1001, pos: [70, 0, 0], hp: 300 }, { id: 1002, pos: [-72, 0, 0], hp: 300 }]
-    })
-    assert.equal(r.mode, "hunt")
-    assert.ok(r.out.move[0] < -0.9, `toward the quiet crate (west): ${r.out.move}`)
-  })
-  test("a crate 5 m from fresh gunfire is skipped outright even when its value would still win", () => {
-    const r = once((o) => {
-      o.self.cubes = 0
-      o.sounds = [gunSound(0, "near")] // ~ (35, 0)
-      o.crates = [{ id: 1001, pos: [30, 0, 0], hp: 300 }, { id: 1002, pos: [-74, 0, 0], hp: 300 }]
-    })
-    assert.equal(r.mode, "hunt")
-    assert.ok(r.out.move[0] < -0.9, `the far quiet crate: ${r.out.move}`)
-  })
-  test("control: with no threat the closer crate wins", () => {
-    const r = once((o) => { o.self.cubes = 0; o.crates = [{ id: 1001, pos: [70, 0, 0], hp: 300 }, { id: 1002, pos: [-72, 0, 0], hp: 300 }] })
-    assert.ok(r.out.move[0] > 0.9)
-  })
-  test("pickups are down-weighted (not skipped) near threats: the quieter laser wins", () => {
-    const r = once((o) => {
-      o.sounds = [gunSound(0, "mid")]
-      o.pickups = [{ id: 8001, kind: "laser", pos: [60, 0, 0] }, { id: 8002, kind: "laser", pos: [-70, 0, 0] }]
-    })
-    assert.equal(r.mode, "loot")
-    assert.ok(r.out.move[0] < -0.9, `${r.out.move}`)
   })
 })
