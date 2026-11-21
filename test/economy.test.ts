@@ -18,9 +18,9 @@ describe("upgrade ranking and offer picking", () => {
     assert.deepEqual([...ECONOMY.upgradePriority].sort(), [...ids].sort(), "priority list and hello.config.upgrades must match exactly")
   })
 
-  test("survivability, then the DPS snowball, then regen/mobility: armor > plating > gun_rate > gun_damage > laser > nanites > servos", () => {
+  test("survivability, then gyros (gates every weapon's fire gate), then the DPS snowball, then regen/mobility: armor > plating > gyros > gun_rate > gun_damage > laser > nanites > servos", () => {
     const rank = (id: string): number => ECONOMY.upgradePriority.indexOf(id)
-    for (const [a, b] of [["armor", "plating"], ["plating", "gun_rate"], ["gun_rate", "gun_damage"], ["gun_damage", "laser_damage"], ["laser_damage", "laser_charge"], ["laser_charge", "nanites"], ["nanites", "servos"], ["servos", "gun_mag"], ["capacitor", "lightning_efficiency"], ["sensors", "mortar_reload"]] as const) {
+    for (const [a, b] of [["armor", "plating"], ["plating", "gyros"], ["gyros", "gun_rate"], ["gun_rate", "gun_damage"], ["gun_damage", "laser_damage"], ["laser_damage", "laser_charge"], ["laser_charge", "nanites"], ["nanites", "servos"], ["servos", "gun_mag"], ["capacitor", "lightning_efficiency"], ["sensors", "mortar_reload"]] as const) {
       assert.ok(rank(a) < rank(b), `${a} should outrank ${b}`)
     }
   })
