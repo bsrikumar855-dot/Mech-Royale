@@ -15,9 +15,8 @@
  *    charged, or when the charge already kills, or when the target is about to slip behind cover; never hold an
  *    off-target charge to the auto-fire limit; release after 0.3 s without a target; never start one outside the zone
  *    or with an enemy within 18 m (half speed while charging).
- *  - v13a always shoot back: no hold-fire at low HP (the squad keeps hunting us; holding fire let it kill us free).
- *  - v13a sticky focus: the last mech target gets cost * (1 - stickyFocusBonus) for stickyMemoryS, so a similar-HP
- *    newcomer never flips us; another shot-line enemy below stickySwitchHp cancels the bonus (finish it).
+ *  - Regen discipline: below 35% HP inside the zone, hold fire on enemies beyond 75 m that we cannot finish (> 350
+ *    HP) so the out-of-combat regen (reset by dealing damage) can start. Keep facing them. Never in a 1v1 brawl.
  *  - Lightning (if held): instant; LOS, range, inside the cone of the actual yaw, energy.
  *  - Safe crate farming: no enemy mech has LOS or is within 50 m, in the zone, > 65% HP -> gun the nearest crate.
  *  - Laser + gun weave: the gun keeps leading and firing while the laser charges or cools down.
@@ -70,8 +69,6 @@ export interface PriorityContext {
   frontArcDeg: number
   /** a full mech's HP (config.mech.hp), for targets whose HP we cannot see */
   fullHp: number
-  /** v13a sticky focus: the mech we were shooting (null = none / stale) */
-  stickyId?: number | null
 }
 
 /** Gun fire tolerance: the angle the target's body subtends at this distance (plus a margin), clamped. */
@@ -100,18 +97,11 @@ export function targetCost(c: Cand, p?: PriorityContext): number {
   return cost
 }
 
-/**
- * Lowest cost wins. v13a sticky focus: the previous mech target (p.stickyId) gets cost * (1 - stickyFocusBonus), so a
- * similar-HP newcomer never flips us, unless ANOTHER candidate is critically low (hp < stickySwitchHp).
- */
 export function pickTarget(pool: readonly Cand[], p?: PriorityContext): Cand | null {
-  const sticky = p?.stickyId ?? null
-  const otherCritical = sticky !== null && pool.some((c) => c.id !== sticky && c.hp !== undefined && c.hp < COMBAT.stickySwitchHp)
   let best: Cand | null = null
   let bestCost = Infinity
   for (const c of pool) {
-    let cost = targetCost(c, p)
-    if (c.kind === "mech" && c.id === sticky && !otherCritical) cost *= 1 - COMBAT.stickyFocusBonus
+    const cost = targetCost(c, p)
     if (cost < bestCost) {
       bestCost = cost
       best = c
@@ -204,14 +194,6 @@ export class RuleCombat implements Combat {
   private lastEnemyLosT = Number.NEGATIVE_INFINITY
   /** The last mech target that had a shot line, and when (short-flicker aim lock). */
   private lastLosTarget: { id: number; t: number } | null = null
-  /** v13a sticky focus: the last mech we targeted and when. */
-  private lastTargetId: number | null = null
-  private lastTargetT = Number.NEGATIVE_INFINITY
-
-  /** Sticky id for this decision (null when stale or none). */
-  stickyId(t: number): number | null {
-    return this.lastTargetId !== null && t - this.lastTargetT <= COMBAT.stickyMemoryS ? this.lastTargetId : null
-  }
   private epoch = -1
   private lastTick: number | null = null
 
@@ -220,8 +202,6 @@ export class RuleCombat implements Combat {
       this.laserSeenT = Number.NEGATIVE_INFINITY
       this.lastEnemyLosT = Number.NEGATIVE_INFINITY
       this.lastLosTarget = null
-      this.lastTargetId = null
-      this.lastTargetT = Number.NEGATIVE_INFINITY
       this.epoch = world.resetCount
     }
     this.lastTick = world.tick
@@ -271,11 +251,13 @@ export class RuleCombat implements Combat {
         .filter((c) => c.los && c.dist <= Math.min(engageRange, COMBAT.npcEngageRangeM))
     }
     const fullHp = cfgNum(world.config.mech as Record<string, unknown>, "hp", self.max_hp)
-    const prio: PriorityContext = { holdsLaser: laser !== null, selfX: self.pos[0], selfY: self.pos[1], frontArcDeg: world.rules.frontArcDeg, fullHp, stickyId: this.stickyId(world.t) }
+    const prio: PriorityContext = { holdsLaser: laser !== null, selfX: self.pos[0], selfY: self.pos[1], frontArcDeg: world.rules.frontArcDeg, fullHp }
     const target = pickTarget(pool, prio)
     const hpFrac = self.max_hp > 0 ? self.hp / self.max_hp : 1
 
-    // v13a: no hold-fire discipline. Whenever a valid target has a shot line we shoot back, whatever our HP.
+    // Regen discipline (strict, never in a brawl): badly wounded in the zone -> no chip shots at distant, healthy enemies.
+    const killable = (c: Cand): boolean => c.hp !== undefined && c.hp <= COMBAT.killableHp
+    const regenHold = !!target && target.kind === "mech" && hpFrac < COMBAT.regenHoldHpFrac && self.in_zone && target.dist > COMBAT.regenHoldDistM && !killable(target)
 
     const fire: [boolean, boolean] = [false, false]
     let aim: Vec2 = idle.aim
@@ -284,7 +266,7 @@ export class RuleCombat implements Combat {
 
     const nearestMech = Math.min(Infinity, ...mechs.map((c) => c.dist))
     const laserCanStart =
-      !!laser && !!target && target.kind === "mech" && target.dist <= laserRange && (laser.cooldown ?? 0) <= 0 && self.in_zone && nearestMech > COMBAT.laserMinStartDistM
+      !!laser && !!target && target.kind === "mech" && target.dist <= laserRange && (laser.cooldown ?? 0) <= 0 && !regenHold && self.in_zone && nearestMech > COMBAT.laserMinStartDistM
     const laserCharging = !!laser && (laser.charge ?? 0) > 0
 
     if (target) {
@@ -296,14 +278,10 @@ export class RuleCombat implements Combat {
       // The laser is hitscan: while it is (about to be) charging, aim at the centre, not the lead point.
       aim = laserCanStart || laserCharging ? aimAt(muzzle, target.com) : leadAim
       // Post-slew gate: the torso keeps slewing toward `aim` while the trigger is held, so judge where it will be.
-      if (gun && gunSlot >= 0 && gunReady(gun) && target.dist <= gunRange && aimErrorRad(postSlewAim(world, aim), leadAim) <= gunFireTolerance(target.radius, target.dist)) {
+      if (gun && gunSlot >= 0 && gunReady(gun) && !regenHold && target.dist <= gunRange && aimErrorRad(postSlewAim(world, aim), leadAim) <= gunFireTolerance(target.radius, target.dist)) {
         fire[gunSlot as 0 | 1] = true
       }
-      if (target.kind === "mech") {
-        this.lastLosTarget = { id: target.id, t: world.t }
-        this.lastTargetId = target.id
-        this.lastTargetT = world.t
-      }
+      if (target.kind === "mech") this.lastLosTarget = { id: target.id, t: world.t }
     } else if (!mechHasLos && this.lastLosTarget && world.t - this.lastLosTarget.t < COMBAT.flickerAimHoldS) {
       // Short flicker (pillar, trunk): keep the torso on the lost target's extrapolated lead point. No fire (no LOS).
       const track = world.tracks.get(this.lastLosTarget.id)
@@ -325,7 +303,7 @@ export class RuleCombat implements Combat {
       fire[lzSlot as 0 | 1] = laserTrigger({ world, map, laser, muzzle, target: laserTarget, canStart: laserCanStart, losLostFor: world.t - this.laserSeenT })
     }
 
-    if (lightning && ltSlot >= 0 && self.energy > COMBAT.lightningMinEnergy && self.energy >= stat(lightning, "energy")) {
+    if (lightning && ltSlot >= 0 && !regenHold && self.energy > COMBAT.lightningMinEnergy && self.energy >= stat(lightning, "energy")) {
       const near = pool.filter((c) => c.dist <= lightningRange).sort((x, y) => x.dist - y.dist)[0]
       const half = (stat(lightning, "cone_deg") * DEG) / 2
       if (near && near.a && Math.abs(angleDiff(self.aim[0], yawTo(self.pos[0], self.pos[1], near.a.pos[0], near.a.pos[1]))) <= half) fire[ltSlot as 0 | 1] = true

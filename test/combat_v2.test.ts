@@ -87,7 +87,7 @@ describe("kill-confirm focus", () => {
   })
 })
 
-describe("v13a: always shoot back (the old < 35% HP regen hold-fire is gone)", () => {
+describe("regen hold-fire (strict: < 35% HP, in zone, > 75 m, not finishable)", () => {
   const scene = (x: number, opts: { hpFrac?: number; foeHp?: number; inZone?: boolean } = {}) => {
     const desired = aimAt(MUZZLE, comOf(x, 0))
     return fight((o) => {
@@ -97,14 +97,11 @@ describe("v13a: always shoot back (the old < 35% HP regen hold-fire is gone)", (
       o.mechs = [enemy(5, [x, 0, 0], { hp: opts.foeHp ?? 1400 })]
     })
   }
-  test("25% HP vs a 1000 HP enemy at 100 m with a shot line: fires (and faces it)", () => {
-    const out = scene(100, { hpFrac: 0.25, foeHp: 1000 })
-    assert.equal(out.fire[0], true)
+  test("holds fire on a distant healthy enemy but keeps facing it", () => {
+    const out = scene(100)
+    assert.deepEqual(out.fire, [false, false])
     assert.equal(out.hasTarget, true)
-    assert.ok(Math.abs(out.aim[0]) < 0.01)
-  })
-  test("30% HP vs a full-HP enemy at 100 m: also fires (was the hold-fire case)", () => {
-    assert.equal(scene(100).fire[0], true)
+    assert.ok(Math.abs(out.aim[0]) < 0.01, "torso stays on the threat (front armour)")
   })
   test("shoots back at anything within 75 m (no hold in a brawl)", () => {
     assert.equal(scene(60).fire[0], true)
@@ -464,80 +461,5 @@ describe("submission 5: per-match state reset", () => {
     const out = tick(new WorldModel(hello), 10.2, 8, []) // fresh WorldModel: same resetCount (0), earlier tick
     assert.equal(out.reload, true)
     assert.equal(out.hasTarget, false)
-  })
-})
-
-// ------------------------------------------------------------------ submission 13a
-describe("v13a: always shoot back with every weapon", () => {
-  test("25% HP: the laser still starts a charge and lightning still fires on a shot-line enemy", () => {
-    const lz = fight((o) => { o.self.hp = 0.25 * o.self.max_hp; withLaser(o); o.mechs = [enemy(5, [100, 0, 0], { hp: 1000 })] })
-    assert.equal(lz.fire[1], true, "laser charge starts")
-    const lt = fight((o) => { o.self.hp = 0.25 * o.self.max_hp; o.self.weapons = [o.self.weapons[0] ?? null, lightningWeapon(hello)]; o.mechs = [enemy(5, [30, 0, 0], { hp: 1000 })] })
-    assert.equal(lt.fire[1], true, "lightning fires")
-  })
-  test("laser charge discipline is unchanged from 6afa909 (no 0.65 s release, no 1.25 s cap, 18 m start)", () => {
-    assert.equal(COMBAT.laserFullChargeFrac, 0.93)
-    assert.equal(COMBAT.laserMinStartDistM, 18)
-    assert.equal((COMBAT as Record<string, unknown>)["laserMaxCrawlS"], undefined)
-  })
-})
-
-describe("v13a: sticky focus fire", () => {
-  // A at 60 m east (800 HP) is targeted first; B 55 m north appears with a slightly LOWER kill-confirm cost
-  const seq = () => {
-    const combat = new RuleCombat()
-    const world = new WorldModel(hello)
-    let t = 10
-    return {
-      world,
-      step: (mechs: ReturnType<typeof enemy>[]) => {
-        t += 0.1
-        return fight((o) => { o.t = t; o.tick = Math.round(t * 20); o.mechs = mechs }, { combat, world })
-      },
-    }
-  }
-  // both face us (no rear-arc bonus for either)
-  const A = (hp = 800) => enemy(5, [60, 0, 0], { hp, aim: [Math.PI, 0] })
-  const B = (hp: number) => enemy(6, [0, 55, 0], { hp, aim: [-Math.PI / 2, 0] })
-  const east = (aim: Vec2) => Math.abs(aim[0]) < 0.05
-  const north = (aim: Vec2) => Math.abs(aim[0] - Math.PI / 2) < 0.05
-  test("control: with no history the lower-cost newcomer (760 HP at 55 m) wins", () => {
-    assert.ok(north(fight((o) => (o.mechs = [A(), B(760)])).aim))
-  })
-  test("locked on A: a similar-HP second enemy does not flip us", () => {
-    const s = seq()
-    assert.ok(east(s.step([A()]).aim))
-    assert.ok(east(s.step([A(), B(760)]).aim), "stays on A")
-    assert.ok(east(s.step([A(), B(760)]).aim), "still A next tick (no flip-flop)")
-  })
-  test("switches to a critically low (200 HP) newcomer, or one much closer to dying (400 HP)", () => {
-    const s = seq()
-    s.step([A()])
-    assert.ok(north(s.step([A(), B(200)]).aim), "200 HP: finish it")
-    const s2 = seq()
-    s2.step([A()])
-    assert.ok(north(s2.step([A(), B(400)]).aim), "400 HP: cost 620 beats sticky A 768")
-  })
-  test("the critical-low rule alone flips the lock: sticky A (300 HP) vs a 240 HP newcomer 80 m out", () => {
-    // without the rule: sticky A 300 * 1.6 * 0.6 = 288 beats B 240 * 1.8 = 432; with it A has no bonus (480) and B wins
-    const s = seq()
-    s.step([A(300)])
-    const far = (hp: number) => enemy(6, [0, 80, 0], { hp, aim: [-Math.PI / 2, 0] })
-    assert.ok(north(s.step([A(300), far(240)]).aim), "240 < 250: switch")
-    const s2 = seq()
-    s2.step([A(300)])
-    assert.ok(east(s2.step([A(300), far(260)]).aim), "260: not critical, the lock holds")
-  })
-  test("the lock expires 2 s after A was last targeted", () => {
-    const s = seq()
-    s.step([A()])
-    for (let i = 0; i < 21; i++) s.step([])
-    assert.ok(north(s.step([A(), B(760)]).aim))
-  })
-  test("a world reset (resetCount) clears the lock", () => {
-    const s = seq()
-    s.step([A()])
-    s.world.reset()
-    assert.ok(north(s.step([A(), B(760)]).aim))
   })
 })
