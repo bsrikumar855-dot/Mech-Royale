@@ -87,15 +87,14 @@ describe("A-D strafing with range control", () => {
     assert.equal(r.mode, "strafe")
     assert.ok(Math.abs(dot(r.out.move, towardEnemy(60, 0))) < 1e-9)
   })
-  test("139 m, healthy, in the safe zone: perpendicular strafe with a mild approach", () => {
+  test("v12: 139 m, 1v1, healthy, in the safe zone: perpendicular strafe with a +0.40 approach", () => {
     const r = once((o) => (o.mechs = [enemy(5, [139, 0, 0])]))
     assert.equal(r.mode, "approach")
-    const radial = dot(r.out.move, towardEnemy(139, 0))
-    assert.ok(radial > 0.2 && radial < 0.35, `radial ${radial}`)
+    assert.ok(Math.abs(dot(r.out.move, towardEnemy(139, 0)) - 0.4 / Math.hypot(1, 0.4)) < 1e-9)
   })
-  test("139 m but not healthy (60% HP): no approach, pure strafe", () => {
-    const r = once((o) => { o.self.hp = o.self.max_hp * 0.6; o.mechs = [enemy(5, [139, 0, 0])] })
-    assert.equal(r.mode, "strafe")
+  test("v12: 139 m at 60% HP still approaches (> 50%); at 45% HP pure strafe", () => {
+    assert.equal(once((o) => { o.self.hp = o.self.max_hp * 0.6; o.mechs = [enemy(5, [139, 0, 0])] }).mode, "approach")
+    assert.equal(once((o) => { o.self.hp = o.self.max_hp * 0.45; o.mechs = [enemy(5, [139, 0, 0])] }).mode, "strafe")
   })
   test("too close (< 42 m, or < 52 m against lightning): backpedal while strafing", () => {
     const r = once((o) => (o.mechs = [enemy(5, [30, 0, 0])]))
@@ -468,11 +467,11 @@ describe("v5: post-kill cube scoop under fire", () => {
     assert.ok(r.out.move[1] < -0.5, `toward the cube: ${r.out.move}`)
     assert.notEqual(once((o) => { o.events = [hitBy]; o.cubes = [{ id: 5001, pos: [0, -28, 0] }] }).mode, "loot")
   })
-  test("one shooter: a cube within 14 m is scooped above 45% HP (50% here); one at 16 m is not", () => {
-    const at = (y: number, hp = 0.5) => once((o) => { o.self.hp = hp * o.self.max_hp; o.mechs = [enemy(5, [60, 0, 0])]; o.cubes = [{ id: 5001, pos: [0, y, 0] }] })
-    assert.equal(at(12).mode, "loot")
-    assert.notEqual(at(16).mode, "loot")
-    assert.notEqual(at(12, 0.44).mode, "loot", "44%: no scoop")
+  test("v12 one shooter: a cube within 18 m is scooped above 40% HP; one at 20 m is not", () => {
+    const at = (y: number, hp = 0.45) => once((o) => { o.self.hp = hp * o.self.max_hp; o.mechs = [enemy(5, [60, 0, 0])]; o.cubes = [{ id: 5001, pos: [0, y, 0] }] })
+    assert.equal(at(16).mode, "loot", "16 m at 45%: post-kill scoop")
+    assert.notEqual(at(20).mode, "loot")
+    assert.notEqual(at(16, 0.39).mode, "loot", "39%: no scoop")
   })
   test("two shooters: never scoops (crossfire retreat wins)", () => {
     const r = once((o) => { o.mechs = [enemy(5, [60, 0, 0]), enemy(6, [0, 60, 0])]; o.cubes = [{ id: 5001, pos: [0, -8, 0] }] })
@@ -486,5 +485,70 @@ describe("v5: snowball upgrade order", () => {
     const p = ECONOMY.upgradePriority
     assert.deepEqual([...p.slice(0, 7)].sort(), ["armor", "gun_damage", "gun_rate", "laser_charge", "laser_damage", "nanites", "plating"])
     assert.deepEqual([...p.slice(-3)].sort(), ["mortar_reload", "mortar_splash", "mortar_velocity"])
+  })
+})
+
+// ------------------------------------------------------------------ v12: fast-kill 1v1
+describe("v12: fast-kill 1v1 pressure", () => {
+  const towardE = (x: number, y: number): [number, number] => [x / Math.hypot(x, y), y / Math.hypot(x, y)]
+  const at = (x: number, opts: { hp?: number; foeHp?: number; weapons?: ("gun" | "lightning")[]; patch?: (o: Observation) => void } = {}) => {
+    const r = once((o) => {
+      o.self.hp = (opts.hp ?? 1) * o.self.max_hp
+      o.mechs = [enemy(5, [x, 0, 0], { hp: opts.foeHp ?? 1400, weapons: opts.weapons ?? ["gun"] })]
+      opts.patch?.(o)
+    })
+    return { r, radial: dot(r.out.move, towardE(x, 0)), lateral: Math.abs(r.out.move[1]) }
+  }
+  test("healthy 1v1 at 85 m: +0.40 approach on top of the full perpendicular strafe", () => {
+    const s = at(85)
+    assert.equal(s.r.mode, "approach")
+    assert.ok(Math.abs(s.radial - 0.4 / Math.hypot(1, 0.4)) < 1e-9, `radial ${s.radial}`)
+    assert.ok(s.lateral > 0.9)
+  })
+  test("healthy 1v1 at 55 m (42-70 m): pure perpendicular A-D strafe", () => {
+    const s = at(55)
+    assert.equal(s.r.mode, "strafe")
+    assert.ok(Math.abs(s.radial) < 1e-9)
+    assert.equal(at(71).r.mode, "approach", "just past 70 m")
+    assert.equal(at(69).r.mode, "strafe")
+  })
+  test("no approach outside the safe rim", () => {
+    assert.notEqual(at(85, { patch: (o) => { o.self.pos = [90, 0, 0]; o.mechs = [enemy(5, [175, 0, 0])]; o.zone = { center: [0, 0], radius: 100, next_center: [0, 0], next_radius: 100, shrink_start: 1e6, shrink_end: 1e6 + 1, dps: 20 } } }).r.mode, "approach")
+  })
+  test("wounded enemy (350 HP) at 50 m with us at 45%: +0.50 kill-confirm push", () => {
+    const s = at(50, { hp: 0.45, foeHp: 350 })
+    assert.equal(s.r.mode, "chase")
+    assert.ok(Math.abs(s.radial - 0.5 / Math.hypot(1, 0.5)) < 1e-9, `radial ${s.radial}`)
+  })
+  test("the chase overrides the 42 m backpedal down to 35 m, then the floor applies", () => {
+    assert.equal(at(38, { foeHp: 350 }).r.mode, "chase", "38 m: still pushing")
+    const inside = at(30, { foeHp: 350 })
+    assert.equal(inside.r.mode, "backpedal", "30 m: below the 35 m floor")
+    assert.ok(inside.radial < 0)
+  })
+  test("the chase also overrides the < 42% wounded retreat in a 1v1 (us at 38%), but not below 35%", () => {
+    assert.equal(at(60, { hp: 0.38, foeHp: 350 }).r.mode, "chase")
+    assert.equal(at(60, { hp: 0.34, foeHp: 350 }).r.mode, "retreat")
+  })
+  test("no chase at 450 HP or above, nor into an enemy's lightning range", () => {
+    assert.notEqual(at(50, { foeHp: 450 }).r.mode, "chase")
+    assert.equal(at(48, { foeHp: 300, weapons: ["gun", "lightning"] }).r.mode, "backpedal", "lightning within 52 m: keep the floor")
+    assert.equal(at(60, { foeHp: 300, weapons: ["gun", "lightning"] }).r.mode, "chase", "beyond 52 m it is fine")
+  })
+  test("preserved: < 42 m backpedal, < 52 m vs lightning, 2v1 retreat (even vs a wounded bot)", () => {
+    assert.equal(at(30).r.mode, "backpedal")
+    assert.equal(at(48, { weapons: ["gun", "lightning"] }).r.mode, "backpedal")
+    const two = once((o) => (o.mechs = [enemy(5, [60, 0, 0], { hp: 200 }), enemy(6, [0, 80, 0])]))
+    assert.equal(two.mode, "retreat")
+  })
+  test("damage from an unseen shooter keeps 6afa909's approach rule (beyond 95 m semantics, > 65% HP)", () => {
+    const r = once((o) => (o.events = [{ type: "damaged", amount: 45, weapon: "gun", bearing: 1, by: 9 }]))
+    assert.equal(r.sense.losCount, 0)
+    assert.equal(r.mode, "approach")
+    assert.ok(Math.abs(dot(r.out.move, [Math.cos(1), Math.sin(1)]) - L.approachBlend / Math.hypot(1, L.approachBlend)) < 1e-9, "+0.30 toward the damage bearing")
+  })
+  test("post-kill: no shot line left, a cube 22 m away is scooped at once", () => {
+    const r = once((o) => { o.events = [{ type: "damaged", amount: 45, weapon: "gun", bearing: 1, by: 9 }]; o.cubes = [{ id: 5001, pos: [0, -22, 0] }] })
+    assert.equal(r.mode, "loot")
   })
 })
