@@ -65,6 +65,8 @@ export class WorldModel {
   sounds: HeardSound[] = []
   damage: DamageRecord[] = []
   private lastTick: number | null = null
+  /** Incremented by every reset(): lets modules with their own memory (Locomotion) detect a new match. Read-only for them. */
+  resetCount = 0
 
   constructor(hello: Hello) {
     this.config = hello.config
@@ -74,6 +76,7 @@ export class WorldModel {
 
   /** Clean state for a new match (also run when a tick regression shows a new match in the same process). */
   reset(): void {
+    this.resetCount++
     this.obs = null
     this.tracks.clear()
     this.sounds = []

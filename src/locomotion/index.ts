@@ -1,107 +1,172 @@
 /**
- * OWNER: Person A. Locomotion: world + map + LootTarget[] -> move / boost / jump.
- * Contract: src/types/contracts.ts (LocomotionOutput). Never throws past decide().
+ * OWNER: Person A. Locomotion (Phase 2): a deterministic, deadline-guarded tactical utility scorer.
+ * Contract: src/types/contracts.ts (LocomotionOutput). Never throws past decide() (Bot also guards it).
  *
- * Phase 1 (simple rules; NO pathfinder, NO utility grid, NO hysteresis until v1 is scored). Priority order:
- *  1. Zone safety: outside the zone, or outside 85% of the current/upcoming radius -> head to the upcoming centre
- *     (zoneAt(t + 10)); boost only when actually outside the zone and energy is above the minimum.
- *  2. Kite: safely inside and an enemy mech within 40 m -> back away with a mild strafe, never out of the safe zone.
- *  3. Loot: no enemy mech within 35 m -> walk to the most valuable LootTarget within 25 m (inside the safe zone).
- *  4. Otherwise stand still: a motionless mech is silent (sound.step_speed) and hard to find. SURVIVAL FIRST.
- * Every chosen heading goes through a wall feeler (MapQuery) that steers around walls and steep slopes.
+ * SURVIVAL FIRST: score is mean(16 - place). Each decision we generate ~40 reachable candidate spots (hold, goal
+ * steps with wall-tangent slides, a loot step, three rings), score them for zone safety (rim-hugging, shrink
+ * timing), 3D cover against the top tracked enemies (fov, weapon, crossfire, path midpoint), mortar/bullet dodging,
+ * spacing, unseen threats, safe loot, silent holding and hysteresis, then walk toward the best one. Boost is a
+ * separate latched controller. jump stays false in this experiment.
  */
-import { LOCOMOTION } from "../config/index.ts"
+import { LOCOMOTION as L } from "../config/index.ts"
 import type { Locomotion, LocomotionOutput, LootTarget, TickContext } from "../types/contracts.ts"
-import type { Vec2 } from "../types/mechfight.ts"
-import { dist2d, unit2 } from "../world/geom.ts"
+import { dist2d } from "../world/geom.ts"
 import type { MapQuery } from "../world/map.ts"
 import type { WorldModel } from "../world/world.ts"
+import { generateCandidates, type Ray, type WalkFn } from "./candidates.ts"
+import { decideBoost } from "./energy.ts"
+import { bulletPaths, predictMortars } from "./projectiles.ts"
+import { evaluate, type Evaluation, type LootGoal } from "./score.ts"
+import { LocomotionState } from "./state.ts"
+import { selectThreats, sizeScale, threatRules } from "./threats.ts"
+import type { Body, Vec2 } from "./types.ts"
+import { buildZone, distToCurrentEdge, zoneGoal, zoneSafe } from "./zone.ts"
 
-const DEG = Math.PI / 180
-
-const rotate = (d: Vec2, deg: number): Vec2 => {
-  const c = Math.cos(deg * DEG)
-  const s = Math.sin(deg * DEG)
-  return [d[0] * c - d[1] * s, d[0] * s + d[1] * c]
+const num = (rec: Record<string, number | undefined> | undefined, key: string, fallback: number): number => {
+  const v = rec?.[key]
+  return typeof v === "number" && Number.isFinite(v) ? v : fallback
 }
 
-/** Is walking from our position along unit heading `d` blocked within the feeler distance (wall, steep slope, map edge)? */
-export function blockedAhead(map: MapQuery, world: WorldModel, d: Vec2): boolean {
-  const [x, y, z] = world.self.pos
-  const body = { radius: world.selfStat("radius", world.rules.radius), height: world.selfStat("height", world.rules.height), stepUp: world.rules.stepUp }
-  const b = map.bounds
-  for (const k of [0.5, 1]) {
-    const qx = x + d[0] * LOCOMOTION.feelerStepM * k
-    const qy = y + d[1] * LOCOMOTION.feelerStepM * k
-    if (qx < b.minX + body.radius || qx > b.maxX - body.radius || qy < b.minY + body.radius || qy > b.maxY - body.radius) return true
-    if (map.slopeDegAt(qx, qy) > world.rules.maxSlopeDeg) return true
-    // Feet at the higher of ours and the local ground: a taller wall in the way still blocks; terrain steepness is the slope test.
-    if (map.isBlockedAt(qx, qy, Math.max(z, map.heightAt(qx, qy)), body)) return true
+/** Straight-line walkability from (x, y, feet z) using MapQuery: map edge, slopes we cannot climb, walls, low decks. */
+export function makeWalk(map: MapQuery | null, world: WorldModel, x: number, y: number, z: number, body: Body): WalkFn {
+  return (ux: number, uy: number, stops: readonly number[]): Ray => {
+    const maxD = Math.max(0, ...stops)
+    if (!map) return { reach: maxD, zAt: () => z }
+    const ds = new Set<number>(stops)
+    for (let d = L.raySampleM; d < maxD; d += L.raySampleM) ds.add(d)
+    const sorted = [...ds].sort((a, b) => a - b)
+    const b = map.bounds
+    const zs: [number, number][] = []
+    let feet = z
+    let reach = 0
+    for (const d of sorted) {
+      const qx = x + ux * d
+      const qy = y + uy * d
+      if (qx < b.minX + body.radius || qx > b.maxX - body.radius || qy < b.minY + body.radius || qy > b.maxY - body.radius) break
+      const ground = map.heightAt(qx, qy)
+      if (ground > feet + body.stepUp && map.slopeDegAt(qx, qy) > world.rules.maxSlopeDeg) break
+      const nf = map.standingHeightAt(qx, qy, feet, body.stepUp, body.height)
+      if (map.isBlockedAt(qx, qy, nf, body)) break
+      feet = nf
+      reach = d
+      zs.push([d, feet])
+    }
+    return {
+      reach,
+      zAt: (d: number): number => {
+        let out = z
+        for (const [sd, sz] of zs) if (sd <= d + 1e-9) out = sz
+        return out
+      },
+    }
   }
-  return false
 }
 
-/** `d` if open, else the first open rotated heading (+-30, 60, 90, 120 deg), else null (boxed in: stand still). */
-export function steerAround(map: MapQuery | null, world: WorldModel, d: Vec2): Vec2 | null {
-  if (!map) return d
-  if (!blockedAhead(map, world, d)) return d
-  for (const deg of LOCOMOTION.steerAnglesDeg) {
-    const r = rotate(d, deg)
-    if (!blockedAhead(map, world, r)) return r
+export class TacticalLocomotion implements Locomotion {
+  readonly state = new LocomotionState()
+  /** The last evaluation (tests and debugging). */
+  last: Evaluation | null = null
+
+  reset(): void {
+    this.state.reset()
+    this.last = null
   }
-  return null
-}
 
-export class RuleLocomotion implements Locomotion {
   decide(ctx: TickContext, loot: readonly LootTarget[]): LocomotionOutput {
-    const { world, map } = ctx
-    const obs = world.obs
+    const { world, map, deadline } = ctx
     const still: LocomotionOutput = { move: [0, 0], boost: false, jump: false }
+    const obs = world.obs
     if (!obs) return still
+    this.state.sync(world)
+
     const self = world.self
-    const [px, py] = self.pos
+    const [sx, sy, sz] = self.pos
+    const scale = sizeScale(world, self.cubes)
+    const body: Body = {
+      radius: Math.max(world.selfStat("radius", world.rules.radius), world.rules.radius * scale),
+      height: Math.max(world.selfStat("height", world.rules.height), world.rules.height * scale),
+      stepUp: world.rules.stepUp,
+    }
+    const hpFrac = self.max_hp > 0 ? self.hp / self.max_hp : 1
+    const zone = buildZone(world, sx, sy, world.selfStat("walk_speed", 1))
+    const threats = selectThreats(world, sx, sy)
+    const tr = threatRules(world)
+    const mortarCfg = world.config.weapons.mortar
+    const groundZ = (x: number, y: number): number => (map ? map.heightAt(x, y) : sz)
+    const mortars = predictMortars(
+      obs,
+      { gravity: num(mortarCfg, "gravity", 0), splashRadius: num(mortarCfg, "splash_radius", 0), ttl: num(mortarCfg, "ttl", 0) },
+      body.radius,
+      map ? (x, y, z) => map.isSolid(x, y, z) : (_x, _y, z) => z <= sz,
+    )
 
-    const now = world.zoneAt(world.t)
-    const future = world.zoneAt(world.t + LOCOMOTION.zoneLeadS)
-    const inSafe = (x: number, y: number): boolean =>
-      dist2d(x, y, now.center[0], now.center[1]) <= now.radius * LOCOMOTION.safeRadiusFrac &&
-      dist2d(x, y, future.center[0], future.center[1]) <= future.radius * LOCOMOTION.safeRadiusFrac
-    const inward = unit2(future.center[0] - px, future.center[1] - py)
-
-    let dir: Vec2 | null = null
-    let boost = false
-
-    if (!self.in_zone || !inSafe(px, py)) {
-      dir = inward
-      boost = !self.in_zone && self.energy > LOCOMOTION.boostMinEnergy
-    } else {
-      let enemy: { x: number; y: number; d: number } | null = null
-      for (const m of obs.mechs ?? []) {
-        if (m.kind !== "mech") continue
-        const d = dist2d(px, py, m.pos[0], m.pos[1])
-        if (!enemy || d < enemy.d) enemy = { x: m.pos[0], y: m.pos[1], d }
-      }
-      if (enemy && enemy.d <= LOCOMOTION.kiteRangeM) {
-        const away = unit2(px - enemy.x, py - enemy.y) ?? [1, 0]
-        let perp: Vec2 = [-away[1], away[0]]
-        if (inward && perp[0] * inward[0] + perp[1] * inward[1] < 0) perp = [-perp[0], -perp[1]] // strafe toward the safe side
-        dir = unit2(away[0] + perp[0] * LOCOMOTION.kiteStrafeBlend, away[1] + perp[1] * LOCOMOTION.kiteStrafeBlend)
-        if (dir && inward && !inSafe(px + dir[0] * LOCOMOTION.kiteLookaheadM, py + dir[1] * LOCOMOTION.kiteLookaheadM)) {
-          dir = unit2(dir[0] + inward[0], dir[1] + inward[1]) ?? dir
-        }
-      } else if (!enemy || enemy.d > LOCOMOTION.lootEnemyClearM) {
-        let best: LootTarget | null = null
-        for (const t of loot) {
-          const d = dist2d(px, py, t.x, t.y)
-          if (d <= LOCOMOTION.lootDetourM && inSafe(t.x, t.y) && (!best || t.value > best.value)) best = t
-        }
-        if (best && dist2d(px, py, best.x, best.y) > LOCOMOTION.lootArriveM) dir = unit2(best.x - px, best.y - py)
-      }
+    // safe loot from Economy
+    let lootGoal: LootGoal | null = null
+    let lootNearby = false
+    for (const t of loot) {
+      const d = dist2d(sx, sy, t.x, t.y)
+      if (d > L.lootCandidateMaxM || !zoneSafe(zone, t.x, t.y)) continue
+      if (d <= L.holdLootBlockM) lootNearby = true
+      if (!lootGoal || t.value > lootGoal.value) lootGoal = { x: t.x, y: t.y, value: t.value }
     }
 
-    if (!dir) return still
-    const steered = steerAround(map, world, dir)
-    if (!steered) return still
-    return { move: steered, boost, jump: false }
+    // threats we hear or feel but cannot see
+    const listedNow = new Set((obs.mechs ?? []).map((m) => m.id))
+    const unseen: number[] = []
+    for (const d of world.damage) {
+      if (world.t - d.t <= L.unseenMemoryS && d.bearing !== null && d.by !== null && !listedNow.has(d.by)) unseen.push(d.bearing)
+    }
+    for (const s of world.sounds) {
+      if (world.t - s.t <= L.unseenMemoryS && s.dist === "near" && L.unseenSoundKinds.includes(s.kind)) unseen.push(s.bearing)
+    }
+
+    const cands = generateCandidates({
+      x: sx,
+      y: sy,
+      z: sz,
+      walk: makeWalk(map, world, sx, sy, sz, body),
+      goal: zoneGoal(zone, sx, sy),
+      loot: lootGoal ? [lootGoal.x, lootGoal.y] : null,
+      deadline,
+    })
+
+    const ev = evaluate(
+      {
+        self: { x: sx, y: sy, z: sz, hpFrac },
+        body,
+        threats,
+        tr,
+        los: map ? (a, b) => map.hasShotLOS(a, b) : () => true,
+        groundZ,
+        zone,
+        mortars,
+        bullets: bulletPaths(obs),
+        npcs: (obs.mechs ?? []).filter((m) => m.kind === "npc").map((m) => ({ x: m.pos[0], y: m.pos[1] })),
+        unseenBearings: unseen,
+        loot: lootGoal,
+        lootNearby,
+        lastMoveDir: this.state.lastMoveDir,
+        lastTargetPos: this.state.lastTargetPos,
+        stuckTangent: this.state.stuckBias(world.t),
+        escapeSide: this.state.committedSide(world.t),
+      },
+      cands,
+      deadline,
+    )
+    this.last = ev
+
+    const best = ev.best
+    const move: Vec2 = best.c.dist > 0 ? [best.c.dx / best.c.dist, best.c.dy / best.c.dist] : [0, 0]
+    const nearest = threats.reduce<(typeof threats)[number] | null>((a, t) => (!a || t.distToSelf < a.distToSelf ? t : a), null)
+    const boost = decideBoost(
+      { best, self: ev.self, outsideZone: distToCurrentEdge(zone, sx, sy) < 0, selfInSplash: ev.selfInSplash, energy: self.energy, nearest },
+      this.state,
+    )
+    if (best.c.kind === "tangent") this.state.commitEscape(world.t, best.c.side)
+    this.state.remember(world, move, best.c.dist > 0 ? [best.c.x, best.c.y] : null)
+    return { move, boost, jump: false }
   }
 }
+
+/** Kept so src/bot.ts (out of scope for this experiment) needs no change. */
+export const RuleLocomotion = TacticalLocomotion

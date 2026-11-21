@@ -15,8 +15,8 @@ Every submission is a **single-variable experiment** (cap: 4 submissions per hou
 
 | Run | Commit | Score | Notes |
 | --- | --- | --- | --- |
-| v1 submission A | | | |
-| v1 submission B (same commit) | | | |
+| v1 submission A | 3fae0bf (BB-C7F0AB94) | **1.90** | Platform built the Dockerfile and passed check.py. 'wait 87 ms' shown on the page (meaning unconfirmed). |
+| v1 submission B (same commit) | _not run_ | | Skipped: we moved straight to Phase 2, so the noise threshold is still UNKNOWN. A Phase 2 delta smaller than ~0.3 cannot be told apart from luck. |
 | **Observed noise (abs gap)** | | | Keep threshold = ______ |
 
 ## Log
@@ -24,5 +24,6 @@ Every submission is a **single-variable experiment** (cap: 4 submissions per hou
 | Commit | Time (IST) | Single-Variable Change | Score | Delta | p99 Tick ms | Decision (Keep/Revert) | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | _(scaffold)_ | Sat 21 Nov | Phase 0: stub modules, inert bot (stands still, never fires) | not submitted | | 0.88 (pinned-core proxy, not Docker) | n/a | Pipeline proof only. First real row is Phase 1 v1. |
-| _(v1 candidate)_ | Sat 21 Nov | Phase 1 rules: zone safety, kiting, wall feeler, loot detour, gun lead + slew gate, lightning-only take, upgrade priority, defensive facing | | | 3.51 (pinned-core proxy, not Docker) | | Submit twice (same commit) for the noise calibration. |
+| 3fae0bf | BB-C7F0AB94, Fri 11:47 PM per the platform page | Phase 1 rules: zone safety, kiting, wall feeler, loot detour, gun lead + slew gate, lightning-only take, upgrade priority, defensive facing | **1.90** | +0.75 vs the 1.15 baseline | 3.51 (pinned-core proxy, not Docker) | **Baseline / Keep** | Platform built the Dockerfile and passed check.py first try. Tagged `best-known-good`. |
+| _(Phase 2 candidate, this commit)_ | Sat 21 Nov | **Locomotion only**: tactical utility scorer (3D cover vs top-6 threats with FOV/weapon danger, crossfire, path midpoint, mortar/bullet dodge, rim-hugging + shrink timing, wall-tangent escape with side commitment, anti-stuck, latched boost) + warm-up 2 -> 300 ticks. Combat/Economy identical to 3fae0bf. | | | 21.6 (pinned-core proxy; unpinned 1.66) | | Submit, then submit again to finally measure noise: without it a delta under ~0.3 is not readable. Pinned-core p99 regressed 3.5 -> ~15-21 ms (JIT warm-up gaps, see CLAUDE.md); 0% late. |
 | | | | | | | | |
