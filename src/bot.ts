@@ -8,6 +8,7 @@ import { mergeAction } from "./arbiter.ts"
 import { RuleCombat } from "./combat/index.ts"
 import { RuleEconomy } from "./economy/index.ts"
 import { RuleLocomotion } from "./locomotion/index.ts"
+import { navGridFor } from "./nav/index.ts"
 import { warn } from "./runtime/log.ts"
 import type { Deadline } from "./runtime/deadline.ts"
 import type { Combat, CombatOutput, Economy, EconomyOutput, Locomotion, LocomotionOutput, TickContext } from "./types/contracts.ts"
@@ -32,6 +33,14 @@ export class Bot {
     this.world = world
     this.map = map
     this.modules = modules
+    // Build the zone-navigation grid now (hello window, before `ready`), never inside a 50 ms decision.
+    if (map) {
+      try {
+        navGridFor(map, world.rules)
+      } catch (e) {
+        warn("nav grid failed (zone runs fall back to the wall feeler)", e)
+      }
+    }
   }
 
   decide(obs: Observation, deadline: Deadline): Action {

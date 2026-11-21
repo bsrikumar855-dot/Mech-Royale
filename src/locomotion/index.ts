@@ -12,11 +12,12 @@
  *  7. idle                        -> wounded: hold still for regen; healthy: patrol the next circle's mid band
  * Every heading goes through a wall feeler with side commitment. All numbers: src/config/locomotion.ts.
  */
-import { LOCOMOTION as L } from "../config/index.ts"
+import { LOCOMOTION as L, NAV } from "../config/index.ts"
 import type { Locomotion, LocomotionOutput, LootTarget, TickContext } from "../types/contracts.ts"
 import type { Vec2, Vec3 } from "../types/mechfight.ts"
 import { clamp, dist2d, unit2 } from "../world/geom.ts"
 import type { WorldModel } from "../world/world.ts"
+import { navGridFor, Navigator } from "../nav/index.ts"
 import { sense, type Sensed } from "./sense.ts"
 import { LocoState } from "./state.ts"
 import { blockedAhead, steer } from "./steer.ts"
@@ -48,9 +49,28 @@ export class EvasiveLocomotion implements Locomotion {
   /** Last decision's mode and senses (tests, audits). */
   lastMode: Mode = "idle"
   lastSense: Sensed | null = null
+  /** Zone navigator (path-planned zone runs). Null without a map. Fields are per match: cleared on a world reset. */
+  private nav: Navigator | null = null
+  private navMap: unknown = null
+  private navEpoch = -1
 
   reset(): void {
     this.state.reset()
+    this.nav?.clear()
+  }
+
+  private navFor(ctx: TickContext): Navigator | null {
+    const map = ctx.map
+    if (!map) return null
+    if (this.navMap !== map) {
+      this.nav = new Navigator(navGridFor(map, ctx.world.rules))
+      this.navMap = map
+      this.navEpoch = ctx.world.resetCount
+    } else if (this.navEpoch !== ctx.world.resetCount) {
+      this.nav?.clear()
+      this.navEpoch = ctx.world.resetCount
+    }
+    return this.nav
   }
 
   decide(ctx: TickContext, _loot: readonly LootTarget[]): LocomotionOutput {
@@ -76,8 +96,22 @@ export class EvasiveLocomotion implements Locomotion {
     const nextC: Vec2 = [z.next_center[0], z.next_center[1]]
     const safeR = cur.radius * L.safeRadiusFrac
     const inSafe = (x: number, y: number): boolean => dist2d(x, y, cur.center[0], cur.center[1]) <= safeR
-    const distNextSafe = Math.max(0, dist2d(px, py, nextC[0], nextC[1]) - z.next_radius * L.nextSafeFrac)
+    let distNextSafe = Math.max(0, dist2d(px, py, nextC[0], nextC[1]) - z.next_radius * L.nextSafeFrac)
     const walk = Math.max(1, world.selfStat("walk_speed", 1))
+    // Path-planned zone runs: a path-distance field toward the NEXT circle's centre (known all phase long), built a few
+    // thousand heap pops per tick. Straight-line travel time under-estimates a detour around buildings and the local
+    // wall feeler cannot leave a concave pocket (it stands still); the field gives both a real distance and a way out.
+    const nav = this.navFor(ctx)
+    const navField = nav ? nav.field(nextC[0], nextC[1], z.next_radius) : null
+    if (nav && navField) {
+      nav.pump(!self.in_zone)
+      if (NAV.pathUrgency) {
+        const pl = nav.pathLength(navField, px, py)
+        if (Number.isFinite(pl)) distNextSafe = Math.max(distNextSafe, pl)
+      }
+    }
+    /** Heading toward the next circle's centre along the planned path (null: not ready / unreachable / arrived). */
+    const zoneDir = (): Vec2 | null => (nav && navField ? nav.direction(navField, px, py, self.pos[2]) : null)
     const urgent = distNextSafe > 0 && distNextSafe / walk >= Math.max(1, z.shrink_end - t) - L.shrinkBufferS
     const outside = !self.in_zone
 
@@ -119,7 +153,7 @@ export class EvasiveLocomotion implements Locomotion {
       boost = energy > L.mortarBoostMinEnergy
     } else if (outside) {
       mode = "outside"
-      const inward = toward(cur.center[0], cur.center[1])
+      const inward = zoneDir() ?? toward(cur.center[0], cur.center[1])
       dir = inward && perp && underFire ? norm(add(inward, perp, L.outsideWeave)) : inward
       boost = energy > L.outsideBoostMinEnergy
     } else if (sn.chargers.length > 0 && perp) {
@@ -128,7 +162,7 @@ export class EvasiveLocomotion implements Locomotion {
       boost = !ourLaserCharging && energy > L.laserDodgeBoostMinEnergy
     } else if (urgent) {
       mode = "shrink"
-      const inward = toward(nextC[0], nextC[1])
+      const inward = zoneDir() ?? toward(nextC[0], nextC[1])
       dir = inward && perp && underFire ? norm(add(inward, perp, L.shrinkWeave)) : inward
     } else if (underFire && perp && b !== null) {
       const towardThreat: Vec2 = [Math.cos(b), Math.sin(b)]
@@ -189,7 +223,7 @@ export class EvasiveLocomotion implements Locomotion {
         dir = perp
       } else if (!inSafe(px, py)) {
         mode = "rim"
-        dir = toward(cur.center[0], cur.center[1])
+        dir = zoneDir() ?? toward(cur.center[0], cur.center[1])
       } else if (hpFrac < L.regenHoldHpFrac) {
         mode = "hold" // wounded, safe and quiet: let the regen run
       } else {
