@@ -1,7 +1,7 @@
 /** Combat v2 + laser economy: distance gate, kill-confirm focus, regen hold, laser state machine, weaving, farming. */
 import assert from "node:assert/strict"
 import { describe, test } from "node:test"
-import { aimAt, leadPoint } from "../src/combat/aim.ts"
+import { aimAt, leadPoint, projectAim } from "../src/combat/aim.ts"
 import { gunFireTolerance, RuleCombat } from "../src/combat/index.ts"
 import { COMBAT, ECONOMY } from "../src/config/index.ts"
 import { RuleEconomy } from "../src/economy/index.ts"
@@ -9,7 +9,7 @@ import { Bot } from "../src/bot.ts"
 import { NO_DEADLINE } from "../src/runtime/deadline.ts"
 import type { MapQuery } from "../src/world/map.ts"
 import type { Observation, Vec2, WeaponObs } from "../src/types/mechfight.ts"
-import { aimErrorRad } from "../src/world/geom.ts"
+import { aimErrorRad, angleDiff } from "../src/world/geom.ts"
 import { WorldModel } from "../src/world/world.ts"
 import { cleanObs, ctxFor, enemy, fixtureHello, lightningWeapon, syntheticMap } from "./helpers.ts"
 
@@ -42,6 +42,7 @@ describe("distance-scaled gun fire gate", () => {
     return fight((o) => {
       o.mechs = [enemy(5, [x, 0, 0], cubes === undefined ? {} : { cubes })]
       o.self.aim = [desired[0] + yawErr, desired[1]]
+      o.self.stats = { ...o.self.stats, turn_rate: 0, pitch_rate: 0 } // no slew: isolates the tolerance geometry
     })
   }
 
@@ -296,5 +297,169 @@ describe("economy: laser and supply drops", () => {
     assert.deepEqual(kinds(drop({ lands_in: 20 })), [], "lands too late")
     assert.deepEqual(kinds(drop({ pos: [60, 0, 0] })), [], "too far")
     assert.ok(ECONOMY.lootBaseValue["supply_drop"]! > ECONOMY.lootBaseValue["laser"]!)
+  })
+})
+
+describe("submission 5: post-slew gun gate", () => {
+  const D100 = (): Vec2 => aimAt(MUZZLE, comOf(100, 0))
+  const shoot = (yawErr: number, over: { turn?: number; pitch?: number; pitchErr?: number } = {}) =>
+    fight((o) => {
+      o.mechs = [enemy(5, [100, 0, 0])]
+      o.self.aim = [D100()[0] + yawErr, D100()[1] + (over.pitchErr ?? 0)]
+      if (over.turn !== undefined) o.self.stats = { ...o.self.stats, turn_rate: over.turn }
+      if (over.pitch !== undefined) o.self.stats = { ...o.self.stats, pitch_rate: over.pitch }
+    })
+
+  test("projectAim clamps each axis by rate * dt and turns the short way round", () => {
+    const p = projectAim([0, 0], [1, 0.5], 4, 3, 0.05)
+    assert.ok(Math.abs(p[0] - 0.2) < 1e-12 && Math.abs(p[1] - 0.15) < 1e-12)
+    const wrap = projectAim([3.1, 0], [-3.1, 0], 4, 3, 0.05) // 0.083 rad the short way, across +-pi
+    assert.ok(Math.abs(angleDiff(-3.1, wrap[0])) < 1e-9, "reaches the target across the wrap")
+    assert.deepEqual(projectAim([0.3, 0.1], [1, 1], 0, Number.NaN, 0.05), [0.3, 0.1], "no rate: no slew")
+  })
+  test("fires when self.aim is 0.12 rad off at 100 m (reachable in 0.05 s at turn_rate 4)", () => {
+    assert.ok(0.12 > gunFireTolerance(2.5, 100), "precondition: the raw-aim gate would hold this shot")
+    assert.equal(COMBAT.slewLeadS, 0.05)
+    assert.equal(shoot(0.12).fire[0], true)
+    assert.equal(shoot(-0.12).fire[0], true)
+  })
+  test("still blocks 0.5 rad (~29 deg) and 90 deg off", () => {
+    assert.equal(shoot(0.5).fire[0], false)
+    assert.equal(shoot(-0.5).fire[0], false)
+    assert.equal(shoot(Math.PI / 2).fire[0], false)
+  })
+  test("uses the LIVE stats.turn_rate / pitch_rate (gyros upgrade or a slow mech)", () => {
+    assert.equal(shoot(0.12, { turn: 2 }).fire[0], true, "0.1 rad step leaves 0.02 rad: inside the 0.03 rad gate")
+    assert.equal(shoot(0.12, { turn: 1 }).fire[0], false, "0.05 rad step leaves 0.07 rad: outside")
+    assert.equal(shoot(0, { pitchErr: 0.12 }).fire[0], true, "pitch 3 rad/s: 0.15 rad step")
+    assert.equal(shoot(0, { pitchErr: 0.12, pitch: 1 }).fire[0], false)
+  })
+  test("laser release still checks the RAW self.aim: a full charge 0.12 rad off keeps holding", () => {
+    const full = laserStats["charge"]! * COMBAT.laserFullChargeFrac + 0.01
+    const scene = (yawErr: number) =>
+      fight((o) => {
+        withLaser(o, laser({ charge: full }))
+        o.mechs = [enemy(5, [100, 0, 0])]
+        o.self.aim = [D100()[0] + yawErr, D100()[1]]
+      })
+    const off = scene(0.12)
+    assert.equal(off.fire[1], true, "laser keeps charging: the projected aim would be on, the raw aim is not")
+    assert.equal(off.fire[0], true, "while the gun (post-slew gate) fires")
+    assert.equal(scene(0).fire[1], false, "on target: release")
+  })
+})
+
+describe("submission 5: anti-blink proactive reload", () => {
+  const seq = () => {
+    const combat = new RuleCombat()
+    const world = new WorldModel(hello)
+    return (t: number, ammo: number, mechs: ReturnType<typeof enemy>[] = []) =>
+      fight((o) => { o.t = t; o.tick = Math.round(t * 20); o.self.weapons[0]!.ammo = ammo; o.mechs = mechs }, { combat, world })
+  }
+  test("suppressed 0.2 s and 1.0 s after LOS was lost; fires once >= 1.5 s have passed", () => {
+    const tick = seq()
+    assert.equal(tick(10, 5, [enemy(5, [100, 0, 0])]).reload, false, "LOS now")
+    assert.equal(tick(10.2, 5).reload, false, "0.2 s")
+    assert.equal(tick(11.0, 5).reload, false, "1.0 s")
+    assert.equal(tick(11.4, 5).reload, false, "1.4 s")
+    assert.equal(tick(11.5, 5).reload, true, "1.5 s")
+  })
+  test("an empty magazine reloads immediately, even right after LOS", () => {
+    const tick = seq()
+    tick(10, 5, [enemy(5, [100, 0, 0])])
+    assert.equal(tick(10.2, 0).reload, true)
+  })
+  test("a re-peek restarts the 1.5 s clock", () => {
+    const tick = seq()
+    tick(10, 5, [enemy(5, [100, 0, 0])])
+    tick(11.0, 5)
+    tick(11.2, 5, [enemy(5, [100, 0, 0])])
+    assert.equal(tick(12.6, 5).reload, false, "1.4 s since the re-peek")
+    assert.equal(tick(12.8, 5).reload, true)
+  })
+  test("blocked while a tracked enemy is within 35 m, even after 1.5 s", () => {
+    const near = seq()
+    near(10, 5, [enemy(5, [30, 0, 0])])
+    assert.equal(near(11.6, 5).reload, false)
+    const far = seq()
+    far(10, 5, [enemy(5, [100, 0, 0])])
+    assert.equal(far(11.6, 5).reload, true)
+  })
+})
+
+describe("submission 5: short-flicker aim lock", () => {
+  const map = syntheticMap()
+  const me: [number, number, number] = [-20, -20, -2]
+  const m: [number, number, number] = [me[0], me[1], me[2] + 7]
+  test("holds the torso on a target behind a pillar for < 0.6 s, never fires, then lets go", () => {
+    assert.ok(map.hasShotLOS(m, [12, -3, 5.7]) && !map.hasShotLOS(m, [12, 5, 5.7]), "precondition")
+    const combat = new RuleCombat()
+    const world = new WorldModel(hello)
+    const tick = (t: number, pos: [number, number, number], aim?: Vec2) =>
+      fight((o) => {
+        o.t = t
+        o.tick = Math.round(t * 20)
+        o.self.pos = [...me]
+        if (aim) o.self.aim = [...aim]
+        o.mechs = [enemy(5, pos)]
+      }, { combat, world, map })
+    const seen = tick(10, [12, -3, 1.2])
+    assert.equal(seen.hasTarget, true)
+    const hidden = tick(10.3, [12, 5, 1.2])
+    assert.equal(hidden.hasTarget, true, "still facing it")
+    assert.equal(hidden.moveConstraint, "FACE_TARGET")
+    const want = aimAt(m, [12, 5, 5.7])
+    assert.ok(aimErrorRad(hidden.aim, want) < 0.02, `aims at its tracked position: ${hidden.aim} vs ${want}`)
+    const onIt = tick(10.4, [12, 5, 1.2], hidden.aim)
+    assert.deepEqual(onIt.fire, [false, false], "no fire without hasShotLOS, even perfectly aligned")
+    assert.equal(tick(10.7, [12, 5, 1.2]).hasTarget, false, "0.7 s: lock released")
+  })
+  test("extrapolates a target that dropped out of the listing along its velocity", () => {
+    const combat = new RuleCombat()
+    const world = new WorldModel(hello)
+    const tick = (t: number, mechs: ReturnType<typeof enemy>[]) =>
+      fight((o) => { o.t = t; o.tick = Math.round(t * 20); o.mechs = mechs }, { combat, world })
+    tick(10, [enemy(5, [100, 0, 0], { vel: [0, 10, 0] })])
+    const out = tick(10.3, [])
+    assert.equal(out.hasTarget, true)
+    assert.deepEqual(out.fire, [false, false])
+    assert.ok(out.aim[0] > Math.atan2(3, 100) - 1e-6, `leads past the 3 m it moved: ${out.aim[0]}`)
+  })
+  test("another enemy with a shot line takes over (no lock)", () => {
+    const combat = new RuleCombat()
+    const world = new WorldModel(hello)
+    const tick = (t: number, mechs: ReturnType<typeof enemy>[]) =>
+      fight((o) => { o.t = t; o.tick = Math.round(t * 20); o.mechs = mechs }, { combat, world })
+    tick(10, [enemy(5, [100, 0, 0])])
+    const out = tick(10.2, [enemy(6, [0, 60, 0])])
+    assert.ok(Math.abs(out.aim[0] - Math.PI / 2) < 0.02, "aims at the visible enemy 6")
+  })
+})
+
+describe("submission 5: per-match state reset", () => {
+  test("world.reset() (resetCount) clears the reload clock and the flicker lock", () => {
+    const combat = new RuleCombat()
+    const world = new WorldModel(hello)
+    const tick = (t: number, mechs: ReturnType<typeof enemy>[]) =>
+      fight((o) => { o.t = t; o.tick = Math.round(t * 20); o.self.weapons[0]!.ammo = 5; o.mechs = mechs }, { combat, world })
+    tick(10, [enemy(5, [100, 0, 0])])
+    const control = tick(10.2, [])
+    assert.equal(control.reload, false)
+    assert.equal(control.hasTarget, true, "control: the lock holds without a reset")
+    tick(10.4, [enemy(5, [100, 0, 0])])
+    world.reset() // as Session does after warm-up: the next tick is NOT earlier, only resetCount tells
+    const after = tick(10.6, [])
+    assert.equal(after.reload, true, "fresh match: no LOS history, so a proactive reload is allowed")
+    assert.equal(after.hasTarget, false, "fresh match: no lock on a target from the old match")
+  })
+  test("a tick that does not advance (new match in a reused process) also resets", () => {
+    const combat = new RuleCombat()
+    const tick = (world: WorldModel, t: number, tk: number, mechs: ReturnType<typeof enemy>[]) =>
+      fight((o) => { o.t = t; o.tick = tk; o.self.weapons[0]!.ammo = 5; o.mechs = mechs }, { combat, world })
+    const w = new WorldModel(hello)
+    tick(w, 10, 200, [enemy(5, [100, 0, 0])])
+    const out = tick(new WorldModel(hello), 10.2, 8, []) // fresh WorldModel: same resetCount (0), earlier tick
+    assert.equal(out.reload, true)
+    assert.equal(out.hasTarget, false)
   })
 })

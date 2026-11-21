@@ -6,7 +6,11 @@
  *  - Target: visible enemy MECHS with a clear MapQuery.hasShotLOS in range, ranked by time-to-kill (HP left) then
  *    distance, with bonuses (mortar carrier when we hold a laser, close, charging a laser, rear arc exposed). Drones only within
  *    npcEngageRangeM and only when no enemy mech is visible at all.
- *  - Gun: linear lead; fire only when the ACTUAL slewed aim is within the angle the target's body subtends.
+ *  - Gun: linear lead; fire only when self.aim, projected slewLeadS ahead toward the commanded aim at the live
+ *    turn/pitch rates (the trigger is held while the torso slews), is within the angle the target's body subtends.
+ *    The laser release and the lightning cone keep using the raw self.aim (hitscan fires on the first tick).
+ *  - Flicker lock: the last LOS mech target out of sight for < flickerAimHoldS and no other mech with a shot line ->
+ *    keep the torso on its extrapolated lead point (never fires without LOS).
  *  - Laser: hold to charge, release to fire (hitscan: aim at the centre, no lead). Release when aligned and fully
  *    charged, or when the charge already kills, or when the target is about to slip behind cover; never hold an
  *    off-target charge to the auto-fire limit; release after 0.3 s without a target; never start one outside the zone
@@ -16,7 +20,8 @@
  *  - Lightning (if held): instant; LOS, range, inside the cone of the actual yaw, energy.
  *  - Safe crate farming: no enemy mech has LOS or is within 50 m, in the zone, > 65% HP -> gun the nearest crate.
  *  - Laser + gun weave: the gun keeps leading and firing while the laser charges or cools down.
- *  - Reload early when no enemy mech has LOS and ammo is low (or empty).
+ *  - Reload at once when empty; reload early (ammo low) only after proactiveReloadDelayS with no enemy shot line and
+ *    no tracked enemy within proactiveReloadClearM (anti-blink: a 2.4 s reload is uninterruptible).
  *  - No target: hasTarget=false + threatBearing so the Arbiter faces the threat (rear hits deal x rear_mult).
  */
 import { COMBAT } from "../config/index.ts"
@@ -25,7 +30,7 @@ import type { ActorObs, SelfObs, Vec2, Vec3, WeaponKind, WeaponObs } from "../ty
 import { aimErrorRad, angleDiff, clamp, yawTo } from "../world/geom.ts"
 import type { MapQuery } from "../world/map.ts"
 import type { WorldModel } from "../world/world.ts"
-import { aimAt, leadPoint } from "./aim.ts"
+import { aimAt, leadPoint, projectAim } from "./aim.ts"
 import { pickThreatBearing } from "./threat.ts"
 
 const DEG = Math.PI / 180
@@ -108,13 +113,29 @@ export function pickTarget(pool: readonly Cand[], p?: PriorityContext): Cand | n
 /** The gun can fire: rounds in the magazine and not mid-reload. */
 export const gunReady = (gun: WeaponObs): boolean => (gun.ammo ?? 0) > 0 && (gun.reload ?? 0) === 0
 
-/** Reload now if empty, or (no enemy mech has LOS and the mag is at/below the threshold); never while already reloading. */
-export function needsReload(gun: WeaponObs, anyMechHasLos: boolean): boolean {
+/**
+ * Reload now if empty, or (proactive reload not blocked and the mag is at/below the threshold); never while already
+ * reloading. `proactiveBlocked` = an enemy mech had a shot line within proactiveReloadDelayS or is within
+ * proactiveReloadClearM (RuleCombat computes it).
+ */
+export function needsReload(gun: WeaponObs, proactiveBlocked: boolean): boolean {
   if ((gun.reload ?? 0) > 0) return false
   const ammo = gun.ammo ?? 0
   const mag = stat(gun, "mag", Infinity)
   if (ammo >= mag) return false
-  return ammo === 0 || (!anyMechHasLos && ammo <= COMBAT.reloadAmmoThreshold)
+  return ammo === 0 || (!proactiveBlocked && ammo <= COMBAT.reloadAmmoThreshold)
+}
+
+/** Gun gate aim: self.aim projected COMBAT.slewLeadS ahead toward the commanded aim at the live turn/pitch rates. */
+export function postSlewAim(world: WorldModel, commanded: Vec2): Vec2 {
+  const self = world.self
+  return projectAim(
+    [self.aim[0], self.aim[1]],
+    commanded,
+    world.selfStat("turn_rate", 0),
+    world.selfStat("pitch_rate", 0),
+    COMBAT.slewLeadS,
+  )
 }
 
 /** Damage a laser release at `charge` seconds would deal to `target` (cube-scaled, with cook-off). */
@@ -165,9 +186,26 @@ export function laserTrigger(args: {
 }
 
 export class RuleCombat implements Combat {
-  /** Last match time the laser had a line-of-sight target (per-match state; a backwards clock resets it). */
+  // Per-match state. Reset when the WorldModel was reset (resetCount) or the tick did not advance (same pattern as
+  // locomotion/state.ts; no position heuristics).
+  /** Last match time the laser had a line-of-sight target. */
   private laserSeenT = Number.NEGATIVE_INFINITY
-  private lastT = Number.NEGATIVE_INFINITY
+  /** Last match time ANY enemy mech had a clear shot line (anti-blink reload delay). */
+  private lastEnemyLosT = Number.NEGATIVE_INFINITY
+  /** The last mech target that had a shot line, and when (short-flicker aim lock). */
+  private lastLosTarget: { id: number; t: number } | null = null
+  private epoch = -1
+  private lastTick: number | null = null
+
+  private sync(world: WorldModel): void {
+    if (world.resetCount !== this.epoch || (this.lastTick !== null && world.tick <= this.lastTick)) {
+      this.laserSeenT = Number.NEGATIVE_INFINITY
+      this.lastEnemyLosT = Number.NEGATIVE_INFINITY
+      this.lastLosTarget = null
+      this.epoch = world.resetCount
+    }
+    this.lastTick = world.tick
+  }
 
   decide(ctx: TickContext): CombatOutput {
     const { world, map } = ctx
@@ -175,8 +213,7 @@ export class RuleCombat implements Combat {
     const self = world.self
     const idle: CombatOutput = { aim: [self.aim[0], self.aim[1]], fire: [false, false], reload: false, moveConstraint: "NONE", hasTarget: false }
     if (!obs) return idle
-    if (world.t < this.lastT) this.laserSeenT = Number.NEGATIVE_INFINITY // new match
-    this.lastT = world.t
+    this.sync(world)
 
     const gunSlot = slotOf(self, "gun")
     const ltSlot = slotOf(self, "lightning")
@@ -240,10 +277,25 @@ export class RuleCombat implements Combat {
       const leadAim = gun ? aimAt(muzzle, leadPoint(muzzle, target.com, vel, stat(gun, "speed"))) : aimAt(muzzle, target.com)
       // The laser is hitscan: while it is (about to be) charging, aim at the centre, not the lead point.
       aim = laserCanStart || laserCharging ? aimAt(muzzle, target.com) : leadAim
-      if (gun && gunSlot >= 0 && gunReady(gun) && !regenHold && target.dist <= gunRange && aimErrorRad(self.aim, leadAim) <= gunFireTolerance(target.radius, target.dist)) {
+      // Post-slew gate: the torso keeps slewing toward `aim` while the trigger is held, so judge where it will be.
+      if (gun && gunSlot >= 0 && gunReady(gun) && !regenHold && target.dist <= gunRange && aimErrorRad(postSlewAim(world, aim), leadAim) <= gunFireTolerance(target.radius, target.dist)) {
         fire[gunSlot as 0 | 1] = true
       }
+      if (target.kind === "mech") this.lastLosTarget = { id: target.id, t: world.t }
+    } else if (!mechHasLos && this.lastLosTarget && world.t - this.lastLosTarget.t < COMBAT.flickerAimHoldS) {
+      // Short flicker (pillar, trunk): keep the torso on the lost target's extrapolated lead point. No fire (no LOS).
+      const track = world.tracks.get(this.lastLosTarget.id)
+      if (track && track.kind === "mech") {
+        const vel = world.estimateVelocity(track)
+        const since = Math.max(0, world.t - track.lastListedT)
+        const h = world.rules.height * (1 + sizePer * (track.cubes ?? 0))
+        const com: Vec3 = [track.pos[0] + vel[0] * since, track.pos[1] + vel[1] * since, track.pos[2] + vel[2] * since + h * COMBAT.comHeightFrac]
+        aim = gun ? aimAt(muzzle, leadPoint(muzzle, com, vel, stat(gun, "speed"))) : aimAt(muzzle, com)
+        hasTarget = true
+        moveConstraint = "FACE_TARGET"
+      }
     }
+    const flickerLock = !target && hasTarget
 
     if (laser && lzSlot >= 0) {
       const laserTarget = target && target.kind === "mech" ? target : null
@@ -258,7 +310,7 @@ export class RuleCombat implements Combat {
     }
 
     // Safe crate farming: no enemy mech has LOS, none tracked nearby, inside the zone, healthy -> gun the nearest crate.
-    if (!target && gun && gunSlot >= 0 && !mechHasLos && self.in_zone && hpFrac > COMBAT.crateFarmMinHpFrac && !enemyNear(world, COMBAT.crateFarmEnemyClearM)) {
+    if (!target && !flickerLock && gun && gunSlot >= 0 && !mechHasLos && self.in_zone && hpFrac > COMBAT.crateFarmMinHpFrac && !enemyNear(world, COMBAT.crateFarmEnemyClearM)) {
       const crateCfg = world.config.crates as Record<string, unknown>
       const ch = cfgNum(crateCfg, "height", 0)
       const cr = cfgNum(crateCfg, "radius", 0)
@@ -273,11 +325,15 @@ export class RuleCombat implements Combat {
       if (best) {
         hasTarget = true
         aim = aimAt(muzzle, best.com)
-        if (gunReady(gun) && aimErrorRad(self.aim, aim) <= gunFireTolerance(best.radius, best.dist)) fire[gunSlot as 0 | 1] = true
+        if (gunReady(gun) && aimErrorRad(postSlewAim(world, aim), aim) <= gunFireTolerance(best.radius, best.dist)) fire[gunSlot as 0 | 1] = true
       }
     }
 
-    const reload = !!gun && needsReload(gun, mechHasLos)
+    // Anti-blink reload: a proactive (ammo > 0) reload needs proactiveReloadDelayS without any enemy shot line and no
+    // enemy close by; an empty magazine reloads at once (needsReload).
+    if (mechHasLos) this.lastEnemyLosT = world.t
+    const proactiveBlocked = world.t - this.lastEnemyLosT < COMBAT.proactiveReloadDelayS || enemyNear(world, COMBAT.proactiveReloadClearM)
+    const reload = !!gun && needsReload(gun, proactiveBlocked)
     const out: CombatOutput = { aim, fire, reload, moveConstraint, hasTarget }
     if (!hasTarget) {
       const bearing = pickThreatBearing(world)

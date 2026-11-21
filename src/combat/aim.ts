@@ -1,5 +1,6 @@
 import { COMBAT } from "../config/index.ts"
 import type { Vec2, Vec3 } from "../types/mechfight.ts"
+import { angleDiff, clamp } from "../world/geom.ts"
 
 /** [yaw, pitch] pointing from `from` to `to` (yaw 0 = east, counter-clockwise; pitch up-positive). */
 export function aimAt(from: readonly number[], to: readonly number[]): Vec2 {
@@ -7,6 +8,18 @@ export function aimAt(from: readonly number[], to: readonly number[]): Vec2 {
   const dy = (to[1] as number) - (from[1] as number)
   const dz = (to[2] as number) - (from[2] as number)
   return [Math.atan2(dy, dx), Math.atan2(dz, Math.hypot(dx, dy))]
+}
+
+/**
+ * Where the torso will point `dt` seconds from now if it slews from `cur` toward `desired` at most `turnRate` rad/s
+ * in yaw (shortest way round) and `pitchRate` rad/s in pitch. Non-finite or negative rates mean no slew.
+ */
+export function projectAim(cur: Vec2, desired: Vec2, turnRate: number, pitchRate: number, dt: number): Vec2 {
+  const maxYaw = Number.isFinite(turnRate) && turnRate > 0 && dt > 0 ? turnRate * dt : 0
+  const maxPitch = Number.isFinite(pitchRate) && pitchRate > 0 && dt > 0 ? pitchRate * dt : 0
+  const dy = clamp(angleDiff(cur[0], desired[0]), -maxYaw, maxYaw)
+  const dp = clamp(desired[1] - cur[1], -maxPitch, maxPitch)
+  return [cur[0] + dy, cur[1] + dp]
 }
 
 /**

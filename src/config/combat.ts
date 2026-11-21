@@ -9,6 +9,13 @@ export const COMBAT = {
   gunAimMarginM: 0.5,
   minFireAngleRad: 0.01,
   maxFireAngleErrorRad: 0.15,
+  /**
+   * Post-slew gun gate: the trigger is held for the next 2 sim ticks while the torso keeps slewing toward the
+   * commanded aim, so the gate compares the desired lead against self.aim projected this far ahead (half a
+   * decision), each axis clamped by the live stats.turn_rate (yaw) / stats.pitch_rate (pitch).
+   * The laser release and the lightning cone still use the raw self.aim (hitscan fires on the first tick).
+   */
+  slewLeadS: 0.05,
 
   /** Target centre of mass = feet + height * this (protocol: pos.z + 4.5 for the 9 m mech). */
   comHeightFrac: 0.5,
@@ -62,8 +69,22 @@ export const COMBAT = {
   leadIterations: 3,
   leadMaxTimeS: 1.5,
 
-  /** Proactive reload when no enemy mech has line of sight and the magazine is at or below this. */
+  /** Proactive reload when no enemy mech has line of sight and the magazine is at or below this... */
   reloadAmmoThreshold: 7,
+  /**
+   * ...and only after no enemy mech has had a clear shot line for this long (anti-blink: a 2.4 s reload must not
+   * start because a target flickered behind a pillar or trunk for one decision)...
+   */
+  proactiveReloadDelayS: 1.5,
+  /** ...and no tracked enemy mech is within this distance. An empty magazine always reloads at once. */
+  proactiveReloadClearM: 35,
+
+  /**
+   * Short-flicker aim lock: when the last line-of-sight mech target drops out of sight for less than this and no
+   * other enemy mech has a shot line, keep the torso on its (extrapolated) lead point so we are on target the tick
+   * it re-peeks. Never fires without hasShotLOS.
+   */
+  flickerAimHoldS: 0.6,
 
   /** Lightning costs `energy` per shot and spends the boost budget: only fire above this. */
   lightningMinEnergy: 12,

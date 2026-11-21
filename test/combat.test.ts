@@ -92,9 +92,11 @@ describe("slew-tolerance fire gate", () => {
   test("the gate is the target's angular size at this range (40 m): inside it fires, outside it holds", () => {
     const base = desired()
     const tol = gunFireTolerance(2.5, Math.hypot(40, 1.5))
+    // turn/pitch rate 0: no post-slew projection, so this isolates the tolerance geometry
     const withErr = (yawErr: number) => run((o) => {
       target(o)
       o.self.aim = [base[0] + yawErr, base[1]]
+      o.self.stats = { ...o.self.stats, turn_rate: 0, pitch_rate: 0 }
     })
     assert.ok(tol < COMBAT.maxFireAngleErrorRad, "at 40 m the body is narrower than the old fixed 0.15 rad gate")
     assert.equal(withErr(tol * 0.8).fire[0], true)
