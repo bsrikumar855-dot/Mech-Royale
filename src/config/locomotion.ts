@@ -96,8 +96,11 @@ export const LOCOMOTION = {
   closeLootM: 18,
   closeLootMinHpFrac: 0.55,
   lootWeave: 0.4,
-  dropRangeM: 70,
-  dropMaxLandsInS: 12,
+  /** Submission 19: widened from 70/12 -- a drop is called 25 s before it lands (fall_s), so react to most of that
+   * window instead of only the last fraction of it. Its landing point must still be inSafe(), so this never sends
+   * us chasing one that's about to fall outside the (shrinking) zone. */
+  dropRangeM: 95,
+  dropMaxLandsInS: 20,
   /** Once this far inside a supply-drop ring, micro-strafe inside it instead of walking to its centre. */
   dropRingInsetM: 1.5,
   dropMicroStrafe: 0.4,
@@ -114,7 +117,7 @@ export const LOCOMOTION = {
   huntCubeCap: 10,
   /** While the gate is open the free-loot reach grows to these ranges. */
   huntLaserRangeM: 90,
-  huntDropRangeM: 75,
+  huntDropRangeM: 105, // submission 19: widened from 75, same reasoning as dropRangeM above
   huntCubeRangeM: 65,
   /** Drones (2 cubes) and crates (1 cube + weapon chance) are hunted up to this far... */
   huntTargetRangeM: 75,
