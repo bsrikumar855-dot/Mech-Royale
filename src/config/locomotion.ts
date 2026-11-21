@@ -96,12 +96,11 @@ export const LOCOMOTION = {
   closeLootM: 18,
   closeLootMinHpFrac: 0.55,
   lootWeave: 0.4,
-  /** Submission 21: range widened again (130 -> 165; 95 -> 130 the step before that, 70 -> 95 before that: +0.02
-   * each of the last two times). dropMaxLandsInS stays at 25 (= fall_s exactly, the practical ceiling already hit
-   * in submission 20 -- nothing left to widen on the time side). Its landing point must still be inSafe(), so this
-   * never sends us chasing one that's about to fall outside the (shrinking) zone, and lootHalfValueM's distance
-   * decay still lets nearer loot outrank a far one in the same tick. */
-  dropRangeM: 165,
+  /** Submission 20: widened again (95/20 -> 130/25, submission 19 was 70/12 and scored +0.02). dropMaxLandsInS is
+   * now the full fall_s (25 s): react from the moment a drop is called, not partway through its fall. Its landing
+   * point must still be inSafe(), so this never sends us chasing one that's about to fall outside the (shrinking)
+   * zone, and lootHalfValueM's distance decay still lets nearer loot outrank a far one in the same tick. */
+  dropRangeM: 130,
   dropMaxLandsInS: 25,
   /** Once this far inside a supply-drop ring, micro-strafe inside it instead of walking to its centre. */
   dropRingInsetM: 1.5,
@@ -119,7 +118,7 @@ export const LOCOMOTION = {
   huntCubeCap: 10,
   /** While the gate is open the free-loot reach grows to these ranges. */
   huntLaserRangeM: 90,
-  huntDropRangeM: 175, // submission 21: widened again from 140 (105 the step before, 75 before that), same reasoning as dropRangeM above
+  huntDropRangeM: 140, // submission 20: widened again from 105 (submission 19 was 75), same reasoning as dropRangeM above
   huntCubeRangeM: 65,
   /** Drones (2 cubes) and crates (1 cube + weapon chance) are hunted up to this far... */
   huntTargetRangeM: 75,

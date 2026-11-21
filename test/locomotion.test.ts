@@ -260,24 +260,24 @@ describe("active loot and supply drops", () => {
     assert.notEqual(once((o) => { o.self.weapons = [o.self.weapons[0] ?? null, laser()]; o.pickups = [pick("laser", 30)] }).mode, "loot")
   })
   const drop = (over: Partial<Observation["drops"][number]> = {}) => ({ id: 20000, pos: [65, 0, 0] as [number, number, number], radius: 8, lands_in: 10, capture_s: 4, progress: 0, holder: null, ...over })
-  test("submission 21: supply drops, uncontested, landing within 25 s, within 175 m (165 m once snowballed)", () => {
+  test("submission 20: supply drops, uncontested, landing within 25 s, within 140 m (130 m once snowballed)", () => {
     const go = once((o) => (o.drops = [drop()]))
     assert.equal(go.mode, "loot")
     assert.ok(go.out.move[0] > 0.99)
     assert.notEqual(once((o) => (o.drops = [drop({ holder: 7 })])).mode, "loot")
   })
-  test("reacts from the moment it's called: 25 s is the full fall_s, so there is no later-than-this (unchanged since submission 20; was 12 s before that)", () => {
+  test("reacts from the moment it's called: 25 s is the full fall_s, so there is no later-than-this (was 20 s, 12 s before that)", () => {
     assert.equal(once((o) => (o.drops = [drop({ lands_in: 24 })])).mode, "loot", "24 s: inside the widened window")
     assert.equal(once((o) => (o.drops = [drop({ lands_in: 25 })])).mode, "loot", "exactly at the new cap (= fall_s: the practical ceiling)")
     assert.notEqual(once((o) => (o.drops = [drop({ lands_in: 26 })])).mode, "loot", "past it (synthetic: lands_in never exceeds fall_s in a real match)")
   })
-  test("pre-snowball (hunt gate open): reaches out to 175 m, not just 140 m (105 m, then 75 m, before that)", () => {
-    assert.equal(once((o) => (o.drops = [drop({ pos: [170, 0, 0] })])).mode, "loot")
-    assert.notEqual(once((o) => (o.drops = [drop({ pos: [180, 0, 0] })])).mode, "loot", "past even the widened hunt range")
+  test("pre-snowball (hunt gate open): reaches out to 140 m, not just 105 m (was 75 m before that)", () => {
+    assert.equal(once((o) => (o.drops = [drop({ pos: [135, 0, 0] })])).mode, "loot")
+    assert.notEqual(once((o) => (o.drops = [drop({ pos: [145, 0, 0] })])).mode, "loot", "past even the widened hunt range")
   })
-  test("once snowballed: reaches out to 165 m, not just 130 m (95 m, then 70 m, before that), but no farther than that", () => {
-    assert.equal(once((o) => { snowballed(o); o.drops = [drop({ pos: [160, 0, 0] })] }).mode, "loot")
-    assert.notEqual(once((o) => { snowballed(o); o.drops = [drop({ pos: [170, 0, 0] })] }).mode, "loot", "past the (smaller) snowballed range")
+  test("once snowballed: reaches out to 130 m, not just 95 m (was 70 m before that), but no farther than that", () => {
+    assert.equal(once((o) => { snowballed(o); o.drops = [drop({ pos: [125, 0, 0] })] }).mode, "loot")
+    assert.notEqual(once((o) => { snowballed(o); o.drops = [drop({ pos: [135, 0, 0] })] }).mode, "loot", "past the (smaller) snowballed range")
   })
   test("inside the capture ring: micro-strafes gently instead of standing still or leaving", () => {
     const r = once((o) => (o.drops = [drop({ pos: [3, 0, 0], lands_in: 0 })]))
