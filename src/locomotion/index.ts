@@ -14,14 +14,14 @@
  */
 import { LOCOMOTION as L } from "../config/index.ts"
 import type { Locomotion, LocomotionOutput, LootTarget, TickContext } from "../types/contracts.ts"
-import type { Vec2 } from "../types/mechfight.ts"
+import type { Vec2, Vec3 } from "../types/mechfight.ts"
 import { clamp, dist2d, unit2 } from "../world/geom.ts"
 import type { WorldModel } from "../world/world.ts"
 import { sense, type Sensed } from "./sense.ts"
 import { LocoState } from "./state.ts"
 import { blockedAhead, steer } from "./steer.ts"
 
-export type Mode = "mortar" | "outside" | "laserDodge" | "shrink" | "retreat" | "backpedal" | "approach" | "strafe" | "loot" | "rim" | "hold" | "patrol" | "idle"
+export type Mode = "hunt" | "mortar" | "outside" | "laserDodge" | "shrink" | "retreat" | "backpedal" | "approach" | "strafe" | "loot" | "rim" | "hold" | "patrol" | "idle"
 
 const add = (a: Vec2, b: Vec2, k: number): Vec2 => [a[0] + b[0] * k, a[1] + b[1] * k]
 const norm = (v: Vec2): Vec2 | null => unit2(v[0], v[1])
@@ -33,6 +33,14 @@ interface LootPick {
   dist: number
   value: number
   ringRadius?: number
+  /** hunt targets (drone, crate): centre to shoot at and the muzzle distance to hold at once there is a shot line */
+  com?: Vec3
+  standoff?: number
+}
+
+const cfg = (rec: unknown, key: string, fallback: number): number => {
+  const v = (rec as Record<string, unknown> | undefined)?.[key]
+  return typeof v === "number" && Number.isFinite(v) ? v : fallback
 }
 
 export class EvasiveLocomotion implements Locomotion {
@@ -125,7 +133,10 @@ export class EvasiveLocomotion implements Locomotion {
     } else if (underFire && perp && b !== null) {
       const towardThreat: Vec2 = [Math.cos(b), Math.sin(b)]
       const close = sn.enemies.some((e) => e.dist < (e.lightning ? L.closeLightningM : L.closeM))
-      const loot = hpFrac > L.closeLootMinHpFrac && sn.losCount <= 1 ? this.pickLoot(world, inSafe, L.closeLootM) : null
+      const close18 = hpFrac > L.closeLootMinHpFrac && sn.losCount <= 1 ? this.pickLoot(world, inSafe, L.closeLootM) : null
+      // v5 post-kill scoop: no shot line on us -> cubes up to 25 m; one shooter -> a cube within 14 m above 45% HP
+      const scoopR = sn.losCount === 0 ? L.scoopNoLosM : sn.losCount === 1 && hpFrac > L.scoopOneLosMinHpFrac ? L.scoopOneLosM : 0
+      const loot = close18 ?? (scoopR > 0 ? this.pickLoot(world, inSafe, scoopR, { cubesOnly: true }) : null)
       if (sn.losCount >= 2 || hpFrac < L.woundedHpFrac) {
         mode = "retreat"
         dir = norm(add(perp, towardThreat, L.retreatBlend))
@@ -144,8 +155,26 @@ export class EvasiveLocomotion implements Locomotion {
         dir = perp
       }
     } else {
-      const loot = this.pickLoot(world, inSafe, Infinity)
-      if (loot) {
+      // v5 snowball gate: nobody can shoot us, nobody tracked within 50 m, inside the safe rim, not yet at 10 cubes + laser
+      const holdsLaser = self.weapons.some((w) => w?.kind === "laser")
+      const huntOpen =
+        sn.losCount === 0 &&
+        !sn.enemies.some((e) => e.dist < L.huntEnemyClearM) &&
+        self.in_zone &&
+        inSafe(px, py) &&
+        (self.cubes < L.huntCubeCap || !holdsLaser)
+      const loot = this.pickLoot(world, inSafe, Infinity, { hunt: huntOpen })
+      if (loot && loot.standoff !== undefined && loot.com) {
+        // drone / crate: walk in until Combat has a shot line within the stand-off, then hold still while it shoots
+        mode = "hunt"
+        const muzzle: Vec3 = [px, py, self.pos[2] + world.selfStat("muzzle_height", world.rules.muzzleHeight)]
+        const d3 = Math.hypot(loot.com[0] - muzzle[0], loot.com[1] - muzzle[1], loot.com[2] - muzzle[2])
+        const inPosition = d3 <= loot.standoff && (!map || map.hasShotLOS(muzzle, loot.com))
+        if (!inPosition) {
+          const tl = toward(loot.x, loot.y)
+          dir = tl && perp && sn.active ? norm(add(tl, perp, L.lootWeave)) : tl
+        }
+      } else if (loot) {
         mode = "loot"
         if (loot.ringRadius !== undefined && loot.dist < loot.ringRadius - L.dropRingInsetM) {
           // inside the capture ring: micro-strafe, never leave it
@@ -170,7 +199,7 @@ export class EvasiveLocomotion implements Locomotion {
     }
 
     // keep evasive / loot / patrol moves inside the safe rim (the zone modes already point inward)
-    const rimChecked: readonly Mode[] = ["retreat", "backpedal", "approach", "strafe", "loot", "patrol", "laserDodge"]
+    const rimChecked: readonly Mode[] = ["hunt", "retreat", "backpedal", "approach", "strafe", "loot", "patrol", "laserDodge"]
     if (dir && rimChecked.includes(mode)) {
       const m = Math.hypot(dir[0], dir[1])
       if (!inSafe(px + (dir[0] / m) * L.rimLookaheadM, py + (dir[1] / m) * L.rimLookaheadM)) {
@@ -202,28 +231,56 @@ export class EvasiveLocomotion implements Locomotion {
     return { move: [steered[0] * mag, steered[1] * mag], boost, jump }
   }
 
-  /** Best loot in reach, read straight from the observation (Economy decides what it will take). */
-  private pickLoot(world: WorldModel, inSafe: (x: number, y: number) => boolean, maxDist: number): LootPick | null {
+  /**
+   * Best loot in reach, read straight from the observation (Economy decides what it will take).
+   * `hunt` (the v5 snowball gate is open): longer laser / drop / cube reach, plus NPC drones and crates as targets that
+   * we approach to a stand-off so Combat shoots them. `cubesOnly`: the post-kill scoop under fire.
+   */
+  private pickLoot(world: WorldModel, inSafe: (x: number, y: number) => boolean, maxDist: number, opts: { hunt?: boolean; cubesOnly?: boolean } = {}): LootPick | null {
     const obs = world.obs!
     const self = world.self
     const [px, py] = self.pos
+    const hunt = opts.hunt === true
     const held = self.weapons.flatMap((w) => (w ? [w.kind] : []))
     const emptySlot = self.weapons.some((w) => w === null)
     let best: LootPick | null = null
-    const consider = (x: number, y: number, kind: string, range: number, ring?: number): void => {
+    const consider = (x: number, y: number, kind: string, range: number, ring?: number, target?: { com: Vec3; standoff: number }): void => {
       const d = dist2d(px, py, x, y)
       if (d > Math.min(range, maxDist) || !inSafe(x, y)) return
-      const value = (L.lootBase[kind] ?? 0) / (1 + d / L.lootHalfValueM)
-      if (!best || value > best.value) best = ring === undefined ? { x, y, kind, dist: d, value } : { x, y, kind, dist: d, value, ringRadius: ring }
+      const value = (L.lootBase[kind] ?? L.huntBase[kind] ?? 0) / (1 + d / L.lootHalfValueM)
+      if (best && value <= best.value) return
+      const pick: LootPick = { x, y, kind, dist: d, value }
+      if (ring !== undefined) pick.ringRadius = ring
+      if (target) {
+        pick.com = target.com
+        pick.standoff = target.standoff
+      }
+      best = pick
     }
-    for (const d of obs.drops ?? []) {
-      if ((d.holder === null || d.holder === self.id) && d.lands_in <= L.dropMaxLandsInS) consider(d.pos[0], d.pos[1], "supply_drop", L.dropRangeM, d.radius)
+    if (!opts.cubesOnly) {
+      for (const d of obs.drops ?? []) {
+        if ((d.holder === null || d.holder === self.id) && d.lands_in <= L.dropMaxLandsInS) consider(d.pos[0], d.pos[1], "supply_drop", hunt ? L.huntDropRangeM : L.dropRangeM, d.radius)
+      }
+      for (const pk of obs.pickups ?? []) {
+        if (pk.kind === "laser" && !held.includes("laser")) consider(pk.pos[0], pk.pos[1], "laser", hunt ? L.huntLaserRangeM : L.laserPickupRangeM)
+        else if (pk.kind === "lightning" && emptySlot && !held.includes("lightning") && !held.includes("laser")) consider(pk.pos[0], pk.pos[1], "lightning", L.lightningPickupRangeM)
+      }
     }
-    for (const pk of obs.pickups ?? []) {
-      if (pk.kind === "laser" && !held.includes("laser")) consider(pk.pos[0], pk.pos[1], "laser", L.laserPickupRangeM)
-      else if (pk.kind === "lightning" && emptySlot && !held.includes("lightning") && !held.includes("laser")) consider(pk.pos[0], pk.pos[1], "lightning", L.lightningPickupRangeM)
+    for (const c of obs.cubes ?? []) consider(c.pos[0], c.pos[1], "cube", hunt ? L.huntCubeRangeM : L.cubeRangeM)
+    if (!hunt || opts.cubesOnly) return best
+    const hpFrac = self.max_hp > 0 ? self.hp / self.max_hp : 1
+    const mechs = obs.mechs ?? []
+    // Combat only shoots drones while no enemy mech is listed at all: do not walk up to one it will not shoot.
+    if (hpFrac > L.huntNpcMinHpFrac && !mechs.some((m) => m.kind === "mech")) {
+      const h = cfg(world.config.npc, "height", world.rules.height)
+      for (const m of mechs) {
+        if (m.kind === "npc") consider(m.pos[0], m.pos[1], "npc", L.huntTargetRangeM, undefined, { com: [m.pos[0], m.pos[1], m.pos[2] + h / 2], standoff: L.huntNpcStandoffM })
+      }
     }
-    for (const c of obs.cubes ?? []) consider(c.pos[0], c.pos[1], "cube", L.cubeRangeM)
+    if (hpFrac > L.huntCrateMinHpFrac) {
+      const h = cfg(world.config.crates, "height", 0)
+      for (const c of obs.crates ?? []) consider(c.pos[0], c.pos[1], "crate", L.huntTargetRangeM, undefined, { com: [c.pos[0], c.pos[1], c.pos[2] + h / 2], standoff: L.huntCrateStandoffM })
+    }
     return best
   }
 

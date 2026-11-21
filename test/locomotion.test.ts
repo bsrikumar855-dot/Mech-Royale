@@ -229,27 +229,46 @@ describe("zone", () => {
 
 describe("active loot and supply drops", () => {
   const pick = (kind: "laser" | "lightning", x: number) => ({ id: 8001, kind, pos: [x, 0, 0] as [number, number, number] })
-  test("walks to a laser up to 80 m away (not 85 m)", () => {
-    assert.equal(once((o) => (o.pickups = [pick("laser", 75)])).mode, "loot")
-    assert.notEqual(once((o) => (o.pickups = [pick("laser", 85)])).mode, "loot")
+  /** 10 cubes + a laser: the v5 snowball gate is closed, the 1b29c35 loot ranges apply. */
+  const snowballed = (o: Observation): void => {
+    o.self.cubes = 10
+    o.self.weapons = [o.self.weapons[0] ?? null, laser()]
+  }
+  test("walks to a laser up to 90 m away while the snowball gate is open (not 95 m)", () => {
+    assert.equal(once((o) => (o.pickups = [pick("laser", 88)])).mode, "loot")
+    assert.notEqual(once((o) => (o.pickups = [pick("laser", 95)])).mode, "loot")
   })
-  test("lightning up to 55 m only with an empty slot and no laser; cubes up to 55 m", () => {
+  test("gate closed by an enemy tracked within 50 m (no shot line): the laser reach is back to 80 m", () => {
+    const map = syntheticMap()
+    const me: [number, number, number] = [-20, 5, -2]
+    const hidden = enemy(5, [20, 5, 2]) // behind building A, 40 m away
+    const at = (dx: number) => new Runner(map).step((o) => { o.self.pos = [...me]; o.mechs = [hidden]; o.pickups = [{ id: 8001, kind: "laser", pos: [me[0] - dx, me[1], -2 - 0.1 * dx] }] })
+    const r = at(85)
+    assert.equal(r.sense.losCount, 0, "precondition: no shot line")
+    assert.notEqual(r.mode, "loot", "85 m: beyond the closed-gate 80 m")
+    assert.equal(at(75).mode, "loot")
+  })
+  test("lightning up to 55 m only with an empty slot and no laser; cubes up to 65 m (55 m once snowballed)", () => {
     assert.equal(once((o) => (o.pickups = [pick("lightning", 50)])).mode, "loot")
     assert.notEqual(once((o) => { o.self.weapons = [o.self.weapons[0] ?? null, laser()]; o.pickups = [pick("lightning", 50)] }).mode, "loot")
-    assert.equal(once((o) => (o.cubes = [{ id: 5001, pos: [50, 0, 0] }])).mode, "loot")
-    assert.notEqual(once((o) => (o.cubes = [{ id: 5001, pos: [60, 0, 0] }])).mode, "loot")
+    assert.equal(once((o) => (o.cubes = [{ id: 5001, pos: [60, 0, 0] }])).mode, "loot")
+    assert.notEqual(once((o) => (o.cubes = [{ id: 5001, pos: [68, 0, 0] }])).mode, "loot")
+    assert.equal(once((o) => { snowballed(o); o.cubes = [{ id: 5001, pos: [50, 0, 0] }] }).mode, "loot")
+    assert.notEqual(once((o) => { snowballed(o); o.cubes = [{ id: 5001, pos: [60, 0, 0] }] }).mode, "loot")
   })
   test("already holding a laser: laser pickups are ignored", () => {
     assert.notEqual(once((o) => { o.self.weapons = [o.self.weapons[0] ?? null, laser()]; o.pickups = [pick("laser", 30)] }).mode, "loot")
   })
   const drop = (over: Partial<Observation["drops"][number]> = {}) => ({ id: 20000, pos: [65, 0, 0] as [number, number, number], radius: 8, lands_in: 10, capture_s: 4, progress: 0, holder: null, ...over })
-  test("supply drops: uncontested, landing within 12 s, within 70 m", () => {
+  test("supply drops: uncontested, landing within 12 s, within 75 m (70 m once snowballed)", () => {
     const go = once((o) => (o.drops = [drop()]))
     assert.equal(go.mode, "loot")
     assert.ok(go.out.move[0] > 0.99)
     assert.notEqual(once((o) => (o.drops = [drop({ holder: 7 })])).mode, "loot")
     assert.notEqual(once((o) => (o.drops = [drop({ lands_in: 13 })])).mode, "loot")
-    assert.notEqual(once((o) => (o.drops = [drop({ pos: [75, 0, 0] })])).mode, "loot")
+    assert.equal(once((o) => (o.drops = [drop({ pos: [73, 0, 0] })])).mode, "loot")
+    assert.notEqual(once((o) => (o.drops = [drop({ pos: [78, 0, 0] })])).mode, "loot")
+    assert.notEqual(once((o) => { snowballed(o); o.drops = [drop({ pos: [73, 0, 0] })] }).mode, "loot")
   })
   test("inside the capture ring: micro-strafes gently instead of standing still or leaving", () => {
     const r = once((o) => (o.drops = [drop({ pos: [3, 0, 0], lands_in: 0 })]))
@@ -357,5 +376,115 @@ describe("integration", () => {
       assert.ok(a.move && Number.isFinite(a.move[0]) && Math.hypot(a.move[0], a.move[1]) <= 1 + 1e-9)
       assert.doesNotThrow(() => JSON.stringify(a))
     }
+  })
+})
+
+// ------------------------------------------------------------------ v5: early snowball rush
+describe("v5: crate and drone hunting (snowball gate)", () => {
+  const crate = (x: number, y = 0) => ({ id: 1001, pos: [x, y, 0] as [number, number, number] })
+  const drone = (x: number, y = 0) => ({ id: 101, kind: "npc" as const, pos: [x, y, 0] as [number, number, number], vel: [0, 0, 0] as [number, number, number], aim: [0, 0] as [number, number], hp: 350, max_hp: 350 })
+  const fresh = (o: Observation): void => {
+    o.self.cubes = 0
+  }
+  test("0 cubes, nobody around: walks toward a crate 65 m away...", () => {
+    const r = once((o) => { fresh(o); o.crates = [crate(65)] })
+    assert.equal(r.mode, "hunt")
+    assert.ok(r.out.move[0] > 0.99, `toward the crate: ${r.out.move}`)
+  })
+  test("...and holds at <= 38 m (muzzle to centre) so Combat breaks it; keeps walking at 40 m", () => {
+    const hold = once((o) => { fresh(o); o.crates = [crate(37)] })
+    assert.equal(hold.mode, "hunt")
+    assert.deepEqual(hold.out.move, [0, 0], "in position: stand still while Combat shoots")
+    assert.ok(once((o) => { fresh(o); o.crates = [crate(40)] }).out.move[0] > 0.99)
+  })
+  test("walks toward an NPC drone 65 m away and holds at <= 35 m; keeps walking at 37 m", () => {
+    const go = once((o) => { fresh(o); o.mechs = [drone(0, 65)] })
+    assert.equal(go.mode, "hunt")
+    assert.ok(go.out.move[1] > 0.99, `toward the drone: ${go.out.move}`)
+    assert.deepEqual(once((o) => { fresh(o); o.mechs = [drone(0, 34)] }).out.move, [0, 0])
+    assert.ok(once((o) => { fresh(o); o.mechs = [drone(0, 37)] }).out.move[1] > 0.99)
+  })
+  test("stand-offs sit inside Combat's own engagement gates (drone 40 m, crate 45 m)", async () => {
+    const { COMBAT } = await import("../src/config/index.ts")
+    assert.ok(L.huntNpcStandoffM < COMBAT.npcEngageRangeM)
+    assert.ok(L.huntCrateStandoffM < COMBAT.crateFarmRangeM)
+  })
+  test("no shot line from the stand-off: keep closing in instead of holding (Combat needs LOS)", () => {
+    const map = syntheticMap()
+    // building A (0..10 x 0..10) sits between us at (-20, 5) and a crate at (25, 5): 45 m, hidden
+    const r = new Runner(map).step((o) => { fresh(o); o.self.pos = [-20, 5, -2]; o.crates = [{ id: 1001, pos: [17, 5, 1.7] }] })
+    assert.equal(r.mode, "hunt")
+    assert.ok(mag(r.out.move) > 0.99, `37 m but no line: keep moving (${r.out.move})`)
+  })
+  test("too wounded to hunt: drones need > 55% HP, crates > 65%", () => {
+    assert.notEqual(once((o) => { fresh(o); o.self.hp = 0.5 * o.self.max_hp; o.mechs = [drone(0, 60)] }).mode, "hunt")
+    assert.notEqual(once((o) => { fresh(o); o.self.hp = 0.6 * o.self.max_hp; o.crates = [crate(60)] }).mode, "hunt")
+    assert.equal(once((o) => { fresh(o); o.self.hp = 0.6 * o.self.max_hp; o.mechs = [drone(0, 60)] }).mode, "hunt")
+  })
+  test("10 cubes + a laser: ignores distant crates and drones and patrols", () => {
+    const done = (o: Observation): void => {
+      o.self.cubes = 10
+      o.self.weapons = [o.self.weapons[0] ?? null, laser()]
+    }
+    assert.equal(once((o) => { done(o); o.crates = [crate(65)] }).mode, "patrol")
+    assert.equal(once((o) => { done(o); o.mechs = [drone(0, 65)] }).mode, "patrol")
+    assert.equal(once((o) => { o.self.cubes = 10; o.crates = [crate(65)] }).mode, "hunt", "10 cubes but no laser yet: keep hunting")
+    assert.equal(once((o) => { o.self.cubes = 3; o.self.weapons = [o.self.weapons[0] ?? null, laser()]; o.crates = [crate(65)] }).mode, "hunt", "laser but 3 cubes: keep hunting")
+  })
+  test("any enemy mech with a shot line overrides hunting at once", () => {
+    const r = once((o) => { fresh(o); o.crates = [crate(40)]; o.mechs = [enemy(5, [0, 100, 0]), drone(0, 30)] })
+    assert.ok(r.sense.losCount >= 1)
+    assert.notEqual(r.mode, "hunt")
+    assert.ok(["strafe", "approach", "backpedal", "retreat"].includes(r.mode), r.mode)
+  })
+  test("an enemy tracked within 50 m (no shot line) also closes the gate", () => {
+    const map = syntheticMap()
+    const r = new Runner(map).step((o) => { fresh(o); o.self.pos = [-20, 5, -2]; o.mechs = [enemy(5, [20, 5, 2])]; o.crates = [{ id: 1001, pos: [-20, -40, -2] }] })
+    assert.equal(r.sense.losCount, 0)
+    assert.notEqual(r.mode, "hunt")
+  })
+  test("outside the safe rim (still in the zone): no hunting, head inward", () => {
+    const r = once((o) => { fresh(o); o.self.pos = [90, 0, 0]; o.zone = { center: [0, 0], radius: 100, next_center: [0, 0], next_radius: 100, shrink_start: 1e6, shrink_end: 1e6 + 1, dps: 20 }; o.crates = [crate(40)] })
+    assert.equal(r.mode, "rim")
+  })
+  test("a laser pickup at 80 m beats a crate at 40 m when we hold no laser", () => {
+    const r = once((o) => { fresh(o); o.crates = [crate(0, 40)]; o.pickups = [{ id: 8001, kind: "laser", pos: [80, 0, 0] }] })
+    assert.equal(r.mode, "loot")
+    assert.ok(r.out.move[0] > 0.99, `toward the laser (east), not the crate (north): ${r.out.move}`)
+  })
+  test("a free cube nearby is grabbed before walking to a drone", () => {
+    const r = once((o) => { fresh(o); o.cubes = [{ id: 5001, pos: [-15, 0, 0] }]; o.mechs = [drone(0, 60)] })
+    assert.equal(r.mode, "loot")
+    assert.ok(r.out.move[0] < -0.99)
+  })
+})
+
+describe("v5: post-kill cube scoop under fire", () => {
+  const hitBy = { type: "damaged" as const, amount: 45, weapon: "gun", bearing: 1, by: 9 }
+  test("no shot line on us (unseen shooter): scoops a cube 22 m away", () => {
+    const r = once((o) => { o.events = [hitBy]; o.cubes = [{ id: 5001, pos: [0, -22, 0] }] })
+    assert.equal(r.sense.losCount, 0)
+    assert.equal(r.mode, "loot")
+    assert.ok(r.out.move[1] < -0.5, `toward the cube: ${r.out.move}`)
+    assert.notEqual(once((o) => { o.events = [hitBy]; o.cubes = [{ id: 5001, pos: [0, -28, 0] }] }).mode, "loot")
+  })
+  test("one shooter: a cube within 14 m is scooped above 45% HP (50% here); one at 16 m is not", () => {
+    const at = (y: number, hp = 0.5) => once((o) => { o.self.hp = hp * o.self.max_hp; o.mechs = [enemy(5, [60, 0, 0])]; o.cubes = [{ id: 5001, pos: [0, y, 0] }] })
+    assert.equal(at(12).mode, "loot")
+    assert.notEqual(at(16).mode, "loot")
+    assert.notEqual(at(12, 0.44).mode, "loot", "44%: no scoop")
+  })
+  test("two shooters: never scoops (crossfire retreat wins)", () => {
+    const r = once((o) => { o.mechs = [enemy(5, [60, 0, 0]), enemy(6, [0, 60, 0])]; o.cubes = [{ id: 5001, pos: [0, -8, 0] }] })
+    assert.equal(r.mode, "retreat")
+  })
+})
+
+describe("v5: snowball upgrade order", () => {
+  test("armor, plating, gun_rate, gun_damage, laser_damage, laser_charge, nanites lead; mortar_* are the last three", async () => {
+    const { ECONOMY } = await import("../src/config/index.ts")
+    const p = ECONOMY.upgradePriority
+    assert.deepEqual([...p.slice(0, 7)].sort(), ["armor", "gun_damage", "gun_rate", "laser_charge", "laser_damage", "nanites", "plating"])
+    assert.deepEqual([...p.slice(-3)].sort(), ["mortar_reload", "mortar_splash", "mortar_velocity"])
   })
 })

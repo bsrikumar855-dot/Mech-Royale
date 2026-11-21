@@ -108,6 +108,33 @@ export const LOCOMOTION = {
   lootBase: { supply_drop: 30, laser: 20, lightning: 14, cube: 10 } as Readonly<Record<string, number>>,
   lootHalfValueM: 20,
 
+  // ---- v5: early snowball rush (crate / drone hunting). Gate: no enemy mech with a shot line, none tracked within
+  // huntEnemyClearM, we stand inside the safe rim, and (cubes < huntCubeCap or no laser held yet).
+  huntEnemyClearM: 50,
+  huntCubeCap: 10,
+  /** While the gate is open the free-loot reach grows to these ranges. */
+  huntLaserRangeM: 90,
+  huntDropRangeM: 75,
+  huntCubeRangeM: 65,
+  /** Drones (2 cubes) and crates (1 cube + weapon chance) are hunted up to this far... */
+  huntTargetRangeM: 75,
+  /** ...only this healthy (drones shoot back; combat's crate gate is 65%)... */
+  huntNpcMinHpFrac: 0.55,
+  huntCrateMinHpFrac: 0.65,
+  /** ...and we walk in until the muzzle-to-centre distance is within this AND there is a shot line, then hold so the
+   * combat module (npc gate 40 m, crate gate 45 m) melts it. */
+  huntNpcStandoffM: 35,
+  huntCrateStandoffM: 38,
+  /** Loot value bases for hunt targets (value = base / (1 + dist / lootHalfValueM); a laser at 80 m beats a crate at 40 m). */
+  huntBase: { npc: 12, crate: 8 } as Readonly<Record<string, number>>,
+
+  // ---- v5: post-kill cube scoop while under fire
+  /** Nobody has a shot line on us (unseen shooter, stray projectile): scoop cubes up to this far. */
+  scoopNoLosM: 25,
+  /** One shooter has a line: still scoop a cube this close if we are above scoopOneLosMinHpFrac. */
+  scoopOneLosM: 14,
+  scoopOneLosMinHpFrac: 0.45,
+
   // ---- idle
   /** Below this HP, safe and unthreatened: stand still (silent) so the out-of-combat regen runs. */
   regenHoldHpFrac: 0.85,
