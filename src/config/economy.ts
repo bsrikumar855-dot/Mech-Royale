@@ -6,13 +6,9 @@ export const ECONOMY = {
    * (armor, plating), inverting the assumption every prior build had made. Placement is confirmed driven by kills
    * here (ghostHold, submission 18, -2.79 for refusing to finish weak enemies), and every cube already grants +4%
    * HP and +4% damage up to 10 cubes regardless of which upgrade is picked, so the upgrade choice is only a
-   * multiplier on top of identical passive growth either way. Submission 26: lightning_* (instant, 45 m cone) joined
-   * the same snowball ahead of armor/plating too (+0.05, a third straight but shrinking gain -- likely near the
-   * plateau of this lever). Submission 27: a narrower, targeted step instead of demoting armor/plating further
-   * across the board -- nanites (faster out-of-combat regen) joins the front too, since regen is the other
-   * mechanic already independently proven to matter (751cb9f, the first real combat-economy win of the day).
-   * servos/gun_mag/etc. are left where they were: this tests nanites specifically, not "demote survivability
-   * against everything". Offers only contain weapon upgrades for weapons we hold, so laser_* and lightning_*
+   * multiplier on top of identical passive growth either way. Submission 26: lightning_* (instant, 45 m cone) joins
+   * the same snowball ahead of armor/plating too -- checking whether this keeps compounding or plateaus. Then
+   * regen/mobility, as before. Offers only contain weapon upgrades for weapons we hold, so laser_* and lightning_*
    * appear once we carry one. ALL 22 ids of hello.config.upgrades are ranked (a test enforces it). An id not listed
    * here (a balance change adds one) ranks after every listed id instead of silently winning, and ties keep the
    * server's choice order.
@@ -25,9 +21,9 @@ export const ECONOMY = {
     "lightning_efficiency",
     "lightning_range",
     "lightning_chain",
-    "nanites", // faster out-of-combat regen
     "armor", // -8% damage taken
     "plating", // +15% max HP
+    "nanites", // faster out-of-combat regen
     "servos", // +8% speed
     "gun_mag",
     "reactor", // +30% energy regen (boost)
