@@ -1,0 +1,4 @@
+export { RULE_FALLBACKS } from "./rules.ts"
+export { RUNTIME, WORLD, MAP } from "./locomotion.ts"
+export { COMBAT } from "./combat.ts"
+export { ECONOMY } from "./economy.ts"

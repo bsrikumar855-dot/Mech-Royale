@@ -1,0 +1,25 @@
+{
+  "name": "mech-royale-bot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "mechfight/1 bot for Mech Royale (Builders Buildathon)",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "gen:types": "node scripts/gen-types.mjs",
+    "typecheck": "tsc --noEmit",
+    "build": "node scripts/build.mjs",
+    "test": "node --test --test-reporter=spec \"test/**/*.test.ts\"",
+    "check": "npm run typecheck && npm run test && npm run build",
+    "sandbox:check": "bash scripts/sandbox-check.sh",
+    "bench": "python scripts/bench.py -- node dist/index.js"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "esbuild": "0.28.2",
+    "json-schema-to-typescript": "16.0.0",
+    "typescript": "5.9.3"
+  }
+}

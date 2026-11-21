@@ -1,0 +1,9 @@
+.git
+node_modules
+dist
+_kit
+test
+.scratch
+*.log
+*.tar.gz
+.env
