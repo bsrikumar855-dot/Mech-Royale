@@ -37,7 +37,16 @@ export class LocoState {
   isBoosting = false
   patrolSign: 1 | -1 = 1
 
+  /** v10: when the current flip period was scheduled, whether the tight (< flipTightBelowM) rhythm applies, and the
+   * last strafe reversal / bullet snap (boost-snap window). */
+  scheduledT = Number.NEGATIVE_INFINITY
+  tight = false
+  reversalT = Number.NEGATIVE_INFINITY
+
   reset(): void {
+    this.scheduledT = Number.NEGATIVE_INFINITY
+    this.tight = false
+    this.reversalT = Number.NEGATIVE_INFINITY
     this.lastTick = null
     this.lastPos = null
     this.strafeSign = 1
@@ -63,16 +72,25 @@ export class LocoState {
     this.lastPos = [x, y]
   }
 
+  /** Same hash as v3, mapped into the long [flipMinS, flipMaxS] or (v10, enemy < flipTightBelowM) tight range. */
   private flipPeriod(): number {
-    return L.flipMinS + (L.flipMaxS - L.flipMinS) * hash01(this.slot * 1000003 + this.flips * 7919 + 1)
+    const h = hash01(this.slot * 1000003 + this.flips * 7919 + 1)
+    return this.tight ? L.flipTightMinS + (L.flipTightMaxS - L.flipTightMinS) * h : L.flipMinS + (L.flipMaxS - L.flipMinS) * h
   }
 
-  /** Advance the strafe schedule while under threat: first activation just schedules, later ones flip on time. */
-  tickStrafe(t: number): void {
+  /**
+   * Advance the strafe schedule while under threat: first activation just schedules, later ones flip on time.
+   * v10: the period is re-derived every tick from when it was scheduled, so an enemy closing inside flipTightBelowM
+   * shortens the current period at once (and leaving that range lengthens it back).
+   */
+  tickStrafe(t: number, tight = false): void {
+    this.tight = tight
     if (this.nextFlipT === Number.NEGATIVE_INFINITY) {
+      this.scheduledT = t
       this.nextFlipT = t + this.flipPeriod()
-    } else if (t >= this.nextFlipT) {
-      this.flipStrafe(t)
+    } else {
+      this.nextFlipT = this.scheduledT + this.flipPeriod()
+      if (t >= this.nextFlipT) this.flipStrafe(t)
     }
   }
 
@@ -80,7 +98,14 @@ export class LocoState {
   flipStrafe(t: number): void {
     this.strafeSign = this.strafeSign === 1 ? -1 : 1
     this.flips++
+    this.scheduledT = t
     this.nextFlipT = t + this.flipPeriod()
+    this.reversalT = t
+  }
+
+  /** v10: a bullet snap also opens a boost-snap window (even when the side does not change). */
+  snapped(t: number): void {
+    this.reversalT = t
   }
 
   /** Force a side (bullet / laser dodge); a change restarts the period so we do not flip straight back. */

@@ -21,7 +21,7 @@ import { sense, type Sensed } from "./sense.ts"
 import { LocoState } from "./state.ts"
 import { blockedAhead, steer } from "./steer.ts"
 
-export type Mode = "hunt" | "mortar" | "outside" | "laserDodge" | "shrink" | "retreat" | "backpedal" | "approach" | "strafe" | "loot" | "rim" | "hold" | "patrol" | "idle"
+export type Mode = "finish" | "hunt" | "mortar" | "outside" | "laserDodge" | "shrink" | "retreat" | "backpedal" | "approach" | "strafe" | "loot" | "rim" | "hold" | "patrol" | "idle"
 
 const add = (a: Vec2, b: Vec2, k: number): Vec2 => [a[0] + b[0] * k, a[1] + b[1] * k]
 const norm = (v: Vec2): Vec2 | null => unit2(v[0], v[1])
@@ -83,12 +83,17 @@ export class EvasiveLocomotion implements Locomotion {
 
     // ---- strafe side: timer, bullet snap, laser dodge, blocked side
     const underFire = sn.losCount > 0 || sn.damagedRecently || sn.projectileNear
-    if (sn.active) S.tickStrafe(t)
+    const dNear = sn.enemies.reduce((m, e) => Math.min(m, e.dist), Infinity)
+    // v10: faster A-D rhythm once an enemy mech is inside flipTightBelowM
+    if (sn.active) S.tickStrafe(t, dNear < L.flipTightBelowM)
     const b = sn.bearing
     const side = (): Vec2 | null => (b === null ? null : [-Math.sin(b) * S.strafeSign, Math.cos(b) * S.strafeSign])
     if (b !== null) {
       const left: Vec2 = [-Math.sin(b), Math.cos(b)]
-      if (sn.bulletEscape) S.setStrafe(t, left[0] * sn.bulletEscape[0] + left[1] * sn.bulletEscape[1] >= 0 ? 1 : -1)
+      if (sn.bulletEscape) {
+        S.setStrafe(t, left[0] * sn.bulletEscape[0] + left[1] * sn.bulletEscape[1] >= 0 ? 1 : -1)
+        S.snapped(t)
+      }
       const charger = sn.chargers[0]
       if (charger && map) {
         // max 2 raycasts: which side, laserDodgeStepM over, can the charger NOT see?
@@ -137,17 +142,34 @@ export class EvasiveLocomotion implements Locomotion {
       // v5 post-kill scoop: no shot line on us -> cubes up to 25 m; one shooter -> a cube within 14 m above 45% HP
       const scoopR = sn.losCount === 0 ? L.scoopNoLosM : sn.losCount === 1 && hpFrac > L.scoopOneLosMinHpFrac ? L.scoopOneLosM : 0
       const loot = close18 ?? (scoopR > 0 ? this.pickLoot(world, inSafe, scoopR, { cubesOnly: true }) : null)
+      // v10 lightning finish: lightning (no laser), spare energy, ONE shooter that is nearly dead -> close inside closeM
+      const shooter = sn.losCount === 1 ? sn.enemies.find((e) => e.los) : undefined
+      const shooterHp = shooter ? world.tracks.get(shooter.id)?.hp : undefined
+      const finish =
+        !!shooter &&
+        self.weapons.some((w) => w?.kind === "lightning") &&
+        !self.weapons.some((w) => w?.kind === "laser") &&
+        energy > L.finishMinEnergy &&
+        shooterHp !== undefined &&
+        shooterHp < L.finishMaxHp
       if (sn.losCount >= 2 || hpFrac < L.woundedHpFrac) {
         mode = "retreat"
         dir = norm(add(perp, towardThreat, L.retreatBlend))
+      } else if (finish && shooter) {
+        mode = "finish"
+        dir = shooter.dist > L.closeM ? norm(add(perp, towardThreat, L.finishBlend)) : perp
       } else if (close) {
         mode = "backpedal"
-        dir = norm(add(perp, towardThreat, L.backpedalBlend))
+        dir = norm(add(perp, towardThreat, L.kiteStrongBlend))
       } else if (loot) {
         mode = "loot"
         const tl = toward(loot.x, loot.y)
         dir = tl ? norm(add(tl, perp, L.lootWeave)) : perp
-      } else if (sn.bearingDist > L.farM && hpFrac > L.approachMinHpFrac && inSafe(px, py)) {
+      } else if (dNear < L.kiteBelowM) {
+        // v10 kite band: hold the fight out at 90-145 m (strong backpedal < 65 m, smooth 65-90 m), full strafe on top
+        mode = "backpedal"
+        dir = norm(add(perp, towardThreat, dNear < L.kiteStrongBelowM ? L.kiteStrongBlend : L.kiteSoftBlend))
+      } else if (sn.bearingDist > L.approachBeyondM && hpFrac > L.approachMinHpFrac && inSafe(px, py)) {
         mode = "approach"
         dir = norm(add(perp, towardThreat, L.approachBlend))
       } else {
@@ -199,7 +221,7 @@ export class EvasiveLocomotion implements Locomotion {
     }
 
     // keep evasive / loot / patrol moves inside the safe rim (the zone modes already point inward)
-    const rimChecked: readonly Mode[] = ["hunt", "retreat", "backpedal", "approach", "strafe", "loot", "patrol", "laserDodge"]
+    const rimChecked: readonly Mode[] = ["finish", "hunt", "retreat", "backpedal", "approach", "strafe", "loot", "patrol", "laserDodge"]
     if (dir && rimChecked.includes(mode)) {
       const m = Math.hypot(dir[0], dir[1])
       if (!inSafe(px + (dir[0] / m) * L.rimLookaheadM, py + (dir[1] / m) * L.rimLookaheadM)) {
@@ -214,6 +236,12 @@ export class EvasiveLocomotion implements Locomotion {
       boost = S.isBoosting
     } else {
       S.isBoosting = false
+    }
+    // v10 boost-snap: right after a strafe reversal or a bullet snap, under fire, spend spare energy (>= 65 keeps a
+    // 50+ reserve for mortar / laser / zone emergencies) on a short boost burst; never while our own laser charges
+    const snapModes: readonly Mode[] = ["strafe", "backpedal", "approach", "finish", "retreat", "loot"]
+    if (snapModes.includes(mode) && (sn.losCount >= 1 || sn.damagedForJump) && !ourLaserCharging && energy >= L.snapBoostMinEnergy && t - S.reversalT < L.snapBoostS) {
+      boost = true
     }
 
     // anti-lead hop

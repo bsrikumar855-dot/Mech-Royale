@@ -56,17 +56,42 @@ export const LOCOMOTION = {
   /** Strafe direction flips after a deterministic, varying period in [flipMinS, flipMaxS]. */
   flipMinS: 0.75,
   flipMaxS: 1.15,
+  /** v10: with an enemy mech tracked closer than flipTightBelowM, flips come faster: [flipTightMinS, flipTightMaxS]. */
+  flipTightBelowM: 85,
+  flipTightMinS: 0.55,
+  flipTightMaxS: 0.85,
   /** Flip at once if the current strafe side is blocked within this distance. */
   strafeBlockProbeM: 5,
   /** Range control: radial blend added to the perpendicular strafe (negative = away from the threat). */
   retreatBlend: -0.55,
-  backpedalBlend: -0.5,
-  approachBlend: 0.3,
   woundedHpFrac: 0.42,
+  /**
+   * v10 long-range kiting. A gun bullet (252 m/s) needs 0.20 s for 50 m: walking 11.7 m/s moves us 2.3 m (< our 2.5 m
+   * radius), so we hold the fight at 90-145 m (0.36-0.58 s flights: 4-7 m of dodge) where gun (230 m) and laser
+   * (280 m) still reach. Hard close (< closeM, or < closeLightningM vs lightning) backpedals before any loot.
+   */
   closeM: 42,
   closeLightningM: 52,
-  farM: 95,
+  /** Below kiteStrongBelowM: strong backpedal; kiteStrongBelowM..kiteBelowM: smooth backpedal; both + full strafe. */
+  kiteStrongBelowM: 65,
+  kiteBelowM: 90,
+  kiteStrongBlend: -0.6,
+  kiteSoftBlend: -0.35,
+  /** Mild approach only beyond this (healthy, inside the safe rim). */
+  approachBeyondM: 155,
+  approachBlend: 0.25,
   approachMinHpFrac: 0.65,
+  /** Lightning finish: holding lightning (no laser), energy > finishMinEnergy, ONE shooter below finishMaxHp -> close
+   * in (finishBlend) until inside closeM instead of backpedalling. */
+  finishMaxHp: 350,
+  finishMinEnergy: 25,
+  finishBlend: 0.6,
+
+  // ---- v10 boost-snap reversals: under fire (shot line, or damaged within jumpDamageWindowS = 2 s), not charging our
+  // laser, energy >= snapBoostMinEnergy -> boost for snapBoostS after every strafe reversal / bullet snap (decisions
+  // are 0.1 s apart, so the burst covers the reversal decision and the next two)
+  snapBoostS: 0.25,
+  snapBoostMinEnergy: 65,
   /** Any move whose 4 m lookahead leaves the safe rim is bent back inward. */
   rimLookaheadM: 4,
 
