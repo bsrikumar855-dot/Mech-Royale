@@ -416,10 +416,20 @@ describe("v5: crate and drone hunting (snowball gate)", () => {
     assert.equal(r.mode, "hunt")
     assert.ok(mag(r.out.move) > 0.99, `37 m but no line: keep moving (${r.out.move})`)
   })
-  test("too wounded to hunt: drones need > 55% HP, crates > 65%", () => {
-    assert.notEqual(once((o) => { fresh(o); o.self.hp = 0.5 * o.self.max_hp; o.mechs = [drone(0, 60)] }).mode, "hunt")
-    assert.notEqual(once((o) => { fresh(o); o.self.hp = 0.6 * o.self.max_hp; o.crates = [crate(60)] }).mode, "hunt")
-    assert.equal(once((o) => { fresh(o); o.self.hp = 0.6 * o.self.max_hp; o.mechs = [drone(0, 60)] }).mode, "hunt")
+  test("v14 heal before farming: below 85% HP no drone or crate hunting; above it, hunting as in 6afa909", () => {
+    assert.notEqual(once((o) => { fresh(o); o.self.hp = 0.75 * o.self.max_hp; o.mechs = [drone(0, 60)] }).mode, "hunt", "75%: no drone hunt")
+    assert.notEqual(once((o) => { fresh(o); o.self.hp = 0.75 * o.self.max_hp; o.crates = [crate(60)] }).mode, "hunt", "75%: no crate hunt")
+    assert.equal(once((o) => { fresh(o); o.self.hp = 0.9 * o.self.max_hp; o.mechs = [drone(0, 60)] }).mode, "hunt", "90%: drone hunt")
+    assert.equal(once((o) => { fresh(o); o.self.hp = 0.9 * o.self.max_hp; o.crates = [crate(60)] }).mode, "hunt", "90%: crate hunt")
+  })
+  test("v14: at 75% HP the bot holds still for regen instead of walking to a drone or crate", () => {
+    const r = once((o) => { fresh(o); o.self.hp = 0.75 * o.self.max_hp; o.crates = [crate(60)]; o.mechs = [drone(0, 60)] })
+    assert.equal(r.mode, "hold")
+    assert.deepEqual(r.out.move, [0, 0])
+  })
+  test("v14: at 75% HP free loot is still scooped (no damage dealt): a cube and a weapon pickup", () => {
+    assert.equal(once((o) => { fresh(o); o.self.hp = 0.75 * o.self.max_hp; o.cubes = [{ id: 5001, pos: [30, 0, 0] }]; o.crates = [crate(40)] }).mode, "loot")
+    assert.equal(once((o) => { fresh(o); o.self.hp = 0.75 * o.self.max_hp; o.pickups = [{ id: 8001, kind: "laser", pos: [50, 0, 0] }] }).mode, "loot")
   })
   test("10 cubes + a laser: ignores distant crates and drones and patrols", () => {
     const done = (o: Observation): void => {

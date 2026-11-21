@@ -463,3 +463,44 @@ describe("submission 5: per-match state reset", () => {
     assert.equal(out.hasTarget, false)
   })
 })
+
+// ------------------------------------------------------------------ submission 14: heal before farming
+describe("v14: no drone / crate shooting below 85% HP (regen needs 5 s without dealing damage)", () => {
+  const drone = (x: number) => ({ id: 101, kind: "npc" as const, pos: [x, 0, 0] as [number, number, number], vel: [0, 0, 0] as [number, number, number], aim: [0, 0] as [number, number], hp: 350, max_hp: 350 })
+  const crate = (x: number) => ({ id: 1001, pos: [x, 0, 0] as [number, number, number], hp: 300 })
+  const shoot = (hp: number, patch: (o: Observation) => void) =>
+    fight((o) => { o.self.hp = hp * o.self.max_hp; patch(o) })
+  test("75% HP: a drone 30 m away is not targeted; 90% HP: it is (and fired at when aligned)", () => {
+    assert.equal(shoot(0.75, (o) => (o.mechs = [drone(30)])).hasTarget, false)
+    const first = shoot(0.9, (o) => (o.mechs = [drone(30)]))
+    assert.equal(first.hasTarget, true)
+    assert.equal(shoot(0.9, (o) => { o.mechs = [drone(30)]; o.self.aim = [...first.aim] }).fire[0], true)
+  })
+  test("75% HP: a crate 20 m away is not shot; 90% HP: it is", () => {
+    assert.equal(shoot(0.75, (o) => (o.crates = [crate(20)])).hasTarget, false)
+    const first = shoot(0.9, (o) => (o.crates = [crate(20)]))
+    assert.equal(first.hasTarget, true)
+    assert.equal(shoot(0.9, (o) => { o.crates = [crate(20)]; o.self.aim = [...first.aim] }).fire[0], true)
+  })
+  test("self-defence: a drone that hit us within 3 s is shot back even at 75% HP; an older hit does not count", () => {
+    const world = new WorldModel(hello)
+    fight((o) => { o.t = 10; o.tick = 200; o.self.hp = 0.75 * o.self.max_hp; o.mechs = [drone(30)] }, { world })
+    const hit = { type: "damaged" as const, amount: 25, weapon: "npc", bearing: 0, by: 101 }
+    const out = fight((o) => { o.t = 10.1; o.tick = 202; o.self.hp = 0.75 * o.self.max_hp; o.mechs = [drone(30)]; o.events = [hit] }, { world })
+    assert.equal(out.hasTarget, true, "it is shooting us: shoot back")
+    const later = fight((o) => { o.t = 13.5; o.tick = 270; o.self.hp = 0.75 * o.self.max_hp; o.mechs = [drone(30)] }, { world })
+    assert.equal(later.hasTarget, false, "3.4 s since the last hit: back to holding fire")
+  })
+  test("self-defence is for drone hits only: a hit from an enemy mech (now out of sight) does not unlock the drone", () => {
+    const world = new WorldModel(hello)
+    fight((o) => { o.t = 9; o.tick = 180; o.self.hp = 0.75 * o.self.max_hp; o.mechs = [enemy(5, [150, 40, 0])] }, { world })
+    const hit = { type: "damaged" as const, amount: 45, weapon: "gun", bearing: 0.3, by: 5 }
+    const out = fight((o) => { o.t = 10; o.tick = 200; o.self.hp = 0.75 * o.self.max_hp; o.mechs = [drone(30)]; o.events = [hit] }, { world })
+    assert.equal(out.hasTarget === true && Math.abs(out.aim[0]) < 0.05, false, "the drone is not targeted")
+  })
+  test("unchanged: enemy mechs are still shot at 75% HP (and the < 35% hold-fire rule is as before)", () => {
+    const desired = aimAt(MUZZLE, comOf(60, 0))
+    assert.equal(shoot(0.75, (o) => { o.self.aim = [...desired]; o.mechs = [enemy(5, [60, 0, 0])] }).fire[0], true)
+    assert.equal(COMBAT.regenHoldHpFrac, 0.35)
+  })
+})

@@ -118,9 +118,10 @@ export const LOCOMOTION = {
   huntCubeRangeM: 65,
   /** Drones (2 cubes) and crates (1 cube + weapon chance) are hunted up to this far... */
   huntTargetRangeM: 75,
-  /** ...only this healthy (drones shoot back; combat's crate gate is 65%)... */
-  huntNpcMinHpFrac: 0.55,
-  huntCrateMinHpFrac: 0.65,
+  /** ...only this healthy. v14: 0.85 for both (was 0.55 / 0.65): shooting a drone or crate resets the 5 s regen
+   * timer (regen needs 5 s without dealing OR taking damage, then 45 HP/s), so heal first, farm after... */
+  huntNpcMinHpFrac: 0.85,
+  huntCrateMinHpFrac: 0.85,
   /** ...and we walk in until the muzzle-to-centre distance is within this AND there is a shot line, then hold so the
    * combat module (npc gate 40 m, crate gate 45 m) melts it. */
   huntNpcStandoffM: 35,

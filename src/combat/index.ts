@@ -18,7 +18,8 @@
  *  - Regen discipline: below 35% HP inside the zone, hold fire on enemies beyond 75 m that we cannot finish (> 350
  *    HP) so the out-of-combat regen (reset by dealing damage) can start. Keep facing them. Never in a 1v1 brawl.
  *  - Lightning (if held): instant; LOS, range, inside the cone of the actual yaw, energy.
- *  - Safe crate farming: no enemy mech has LOS or is within 50 m, in the zone, > 65% HP -> gun the nearest crate.
+ *  - Safe crate farming: no enemy mech has LOS or is within 50 m, in the zone, > 85% HP (v14) -> gun the nearest crate.
+ *    v14: drones too only above 85% HP unless one damaged us within npcSelfDefenseS (regen needs 5 s of no damage).
  *  - Laser + gun weave: the gun keeps leading and firing while the laser charges or cools down.
  *  - Reload at once when empty; reload early (ammo low) only after proactiveReloadDelayS with no enemy shot line and
  *    no tracked enemy within proactiveReloadClearM (anti-blink: a 2.4 s reload is uninterruptible).
@@ -243,7 +244,11 @@ export class RuleCombat implements Combat {
     const mechs = (obs.mechs ?? []).filter((m) => m.kind === "mech").map(view)
     const mechHasLos = mechs.some((c) => c.los)
     let pool = mechs.filter((c) => c.los && c.dist <= engageRange)
-    if (mechs.length === 0) {
+    // v14: below npcFarmMinHpFrac a drone is shot only in self-defence (it damaged us within npcSelfDefenseS: its hits
+    // reset the regen timer anyway); otherwise we hold fire so the 5 s regen timer can run out.
+    const npcHitUs = world.damage.some((d) => d.by !== null && world.t - d.t <= COMBAT.npcSelfDefenseS && world.tracks.get(d.by)?.kind === "npc")
+    const npcFarmOk = (self.max_hp > 0 ? self.hp / self.max_hp : 1) > COMBAT.npcFarmMinHpFrac || npcHitUs
+    if (mechs.length === 0 && npcFarmOk) {
       // No enemy mech in sight at all: a nearby drone is fair game (cubes), but never a distraction from a mech.
       pool = (obs.mechs ?? [])
         .filter((m) => m.kind === "npc")

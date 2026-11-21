@@ -62,7 +62,11 @@ export const COMBAT = {
 
   // ---- safe crate farming (gun only): no enemy mech has LOS, none tracked within crateFarmEnemyClearM
   crateFarmEnemyClearM: 50,
-  crateFarmMinHpFrac: 0.65,
+  /** v14: shoot crates / drones only above this HP fraction (was 0.65 for crates, none for drones): dealing damage
+   * resets the 5 s regen timer, so heal first. A drone that damaged us within npcSelfDefenseS is always shot back. */
+  crateFarmMinHpFrac: 0.85,
+  npcFarmMinHpFrac: 0.85,
+  npcSelfDefenseS: 3,
   crateFarmRangeM: 45,
 
   /** Lead solver: fixed-point iterations and the longest flight time we will lead for. */
