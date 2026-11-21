@@ -1,18 +1,14 @@
 /** OWNER: Person B. Economy tunables. Game mechanics (costs, caps, effects) come from hello.config, never from here. */
 export const ECONOMY = {
   /**
-   * Upgrade priority, best first: survivability (armor, plating), then gyros (every weapon's fire gate is
-   * postSlewAim projected at the live turn/pitch rate: a slow torso means ready-with-LOS ticks where we simply
-   * cannot bring the gun to bear, so turn rate is a can-we-fire-at-all multiplier on every upgrade after it, not
-   * just another damage stat), then the DPS snowball (gun rate/damage, laser), then regen and mobility. Offers
-   * only contain weapon upgrades for weapons we hold, so laser_* appear once we carry one. ALL 22 ids of
-   * hello.config.upgrades are ranked (a test enforces it). An id not listed here (a balance change adds one) ranks
-   * after every listed id instead of silently winning, and ties keep the server's choice order.
+   * Upgrade priority, best first: survivability (armor, plating) then the DPS snowball (gun rate/damage, laser), then
+   * regen and mobility. Offers only contain weapon upgrades for weapons we hold, so laser_* appear once we carry one.
+   * ALL 22 ids of hello.config.upgrades are ranked (a test enforces it). An id not listed here (a balance change adds
+   * one) ranks after every listed id instead of silently winning, and ties keep the server's choice order.
    */
   upgradePriority: [
     "armor", // -8% damage taken
     "plating", // +15% max HP
-    "gyros", // +30%/level turn+pitch rate (max 2): gates every weapon's postSlewAim fire check
     "gun_rate",
     "gun_damage",
     "laser_damage",
@@ -25,6 +21,7 @@ export const ECONOMY = {
     "lightning_efficiency",
     "lightning_range",
     "lightning_chain",
+    "gyros", // turn rate: the slew gate depends on it
     "gun_velocity",
     "sensors",
     "jets",
