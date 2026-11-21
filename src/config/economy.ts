@@ -1,22 +1,26 @@
 /** OWNER: Person B. Economy tunables. Game mechanics (costs, caps, effects) come from hello.config, never from here. */
 export const ECONOMY = {
   /**
-   * Upgrade priority, best first. Submission 24 (kept, +0.04): the gun DPS snowball (gun_rate, gun_damage) ranks
-   * ABOVE survivability (armor, plating), inverting the assumption every prior build had made -- placement is
-   * confirmed driven by kills here (ghostHold, submission 18, -2.79 for refusing to finish weak enemies), and every
-   * cube already grants +4% HP and +4% damage up to 10 cubes regardless of which upgrade is picked, so the upgrade
-   * choice is only a multiplier on top of identical passive growth either way. Submission 25: the same logic now
-   * extends to laser_damage/laser_charge (315 dmg per hit, far more than the gun) -- they join the DPS snowball
-   * ahead of armor/plating too, instead of trailing it. Then regen/mobility, as before. Offers only contain weapon
-   * upgrades for weapons we hold, so laser_* appear once we carry one. ALL 22 ids of hello.config.upgrades are
-   * ranked (a test enforces it). An id not listed here (a balance change adds one) ranks after every listed id
-   * instead of silently winning, and ties keep the server's choice order.
+   * Upgrade priority, best first. Submissions 24 (+0.04) and 25 (+0.08, compounding): the whole weapon-damage
+   * snowball -- gun (gun_rate, gun_damage) then laser (laser_damage, laser_charge) -- ranks ABOVE survivability
+   * (armor, plating), inverting the assumption every prior build had made. Placement is confirmed driven by kills
+   * here (ghostHold, submission 18, -2.79 for refusing to finish weak enemies), and every cube already grants +4%
+   * HP and +4% damage up to 10 cubes regardless of which upgrade is picked, so the upgrade choice is only a
+   * multiplier on top of identical passive growth either way. Submission 26: lightning_* (instant, 45 m cone) joins
+   * the same snowball ahead of armor/plating too -- checking whether this keeps compounding or plateaus. Then
+   * regen/mobility, as before. Offers only contain weapon upgrades for weapons we hold, so laser_* and lightning_*
+   * appear once we carry one. ALL 22 ids of hello.config.upgrades are ranked (a test enforces it). An id not listed
+   * here (a balance change adds one) ranks after every listed id instead of silently winning, and ties keep the
+   * server's choice order.
    */
   upgradePriority: [
     "gun_rate",
     "gun_damage",
     "laser_damage",
     "laser_charge",
+    "lightning_efficiency",
+    "lightning_range",
+    "lightning_chain",
     "armor", // -8% damage taken
     "plating", // +15% max HP
     "nanites", // faster out-of-combat regen
@@ -24,9 +28,6 @@ export const ECONOMY = {
     "gun_mag",
     "reactor", // +30% energy regen (boost)
     "capacitor", // +30 max energy
-    "lightning_efficiency",
-    "lightning_range",
-    "lightning_chain",
     "gyros", // turn rate: the slew gate depends on it
     "gun_velocity",
     "sensors",
