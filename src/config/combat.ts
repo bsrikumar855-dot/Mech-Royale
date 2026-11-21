@@ -40,12 +40,7 @@ export const COMBAT = {
   rearArcBonus: 0.1,
 
   // ---- regen hold-fire discipline (dealing damage resets the 5 s out-of-combat regen timer). Strict: never in a 1v1 brawl.
-  /**
-   * Below this HP fraction, hold fire on a distant (> regenHoldDistM), unfinishable (> killableHp) enemy mech while in
-   * the zone, so the 45 HP/s regen can start. Submission 15 widens it from 0.35 to 0.50 (regen is the live lever:
-   * removing the hold cost -0.13; pausing farming while wounded gained +0.02).
-   */
-  regenHoldHpFrac: 0.5,
+  regenHoldHpFrac: 0.35,
   /** Hold fire only on targets farther than this that we cannot finish (hp > killableHp). */
   regenHoldDistM: 75,
 

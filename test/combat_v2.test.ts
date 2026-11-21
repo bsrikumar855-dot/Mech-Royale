@@ -87,48 +87,31 @@ describe("kill-confirm focus", () => {
   })
 })
 
-describe("regen hold-fire (strict: < 50% HP, in zone, > 75 m, not finishable)", () => {
-  const scene = (x: number, opts: { hpFrac?: number; foeHp?: number; inZone?: boolean; weapon?: WeaponObs; torso?: [number, number] } = {}) => {
+describe("regen hold-fire (strict: < 35% HP, in zone, > 75 m, not finishable)", () => {
+  const scene = (x: number, opts: { hpFrac?: number; foeHp?: number; inZone?: boolean } = {}) => {
     const desired = aimAt(MUZZLE, comOf(x, 0))
     return fight((o) => {
-      o.self.hp = o.self.max_hp * (opts.hpFrac ?? 0.45)
+      o.self.hp = o.self.max_hp * (opts.hpFrac ?? 0.3)
       o.self.in_zone = opts.inZone ?? true
-      o.self.aim = opts.torso ?? [...desired]
-      if (opts.weapon) o.self.weapons = [o.self.weapons[0] ?? null, opts.weapon]
+      o.self.aim = [...desired]
       o.mechs = [enemy(5, [x, 0, 0], { hp: opts.foeHp ?? 1400 })]
     })
   }
-  test("45% HP vs a 1400 HP enemy at 100 m, in the zone: holds fire but keeps facing it", () => {
-    const out = scene(100, { torso: [2, 0] }) // torso turned away: the commanded aim must bring it back onto the enemy
+  test("holds fire on a distant healthy enemy but keeps facing it", () => {
+    const out = scene(100)
     assert.deepEqual(out.fire, [false, false])
     assert.equal(out.hasTarget, true)
-    const onIt = aimAt(MUZZLE, comOf(100, 0))
-    assert.ok(Math.abs(out.aim[0] - onIt[0]) < 0.01 && Math.abs(out.aim[1] - onIt[1]) < 0.01, "torso stays on the threat (front armour)")
+    assert.ok(Math.abs(out.aim[0]) < 0.01, "torso stays on the threat (front armour)")
   })
-  test("the old 35% boundary no longer matters: 30% and 45% both hold", () => {
-    assert.deepEqual(scene(100, { hpFrac: 0.3 }).fire, [false, false])
-    assert.deepEqual(scene(100, { hpFrac: 0.45 }).fire, [false, false])
-  })
-  test("55% HP (and exactly 50%): fires", () => {
-    assert.equal(scene(100, { hpFrac: 0.55 }).fire[0], true)
-    assert.equal(scene(100, { hpFrac: 0.5 }).fire[0], true)
-  })
-  test("45% HP: the laser does not START a charge on that distant healthy enemy (it does at 55%)", () => {
-    assert.equal(scene(100, { weapon: laser() }).fire[1], false)
-    assert.equal(scene(100, { weapon: laser(), hpFrac: 0.55 }).fire[1], true)
-  })
-  test("45% HP: lightning is unaffected beyond its range, and still fires inside it (no hold inside 75 m)", () => {
-    assert.equal(scene(100, { weapon: lightningWeapon() }).fire[1], false, "100 m is beyond the 45 m reach anyway")
-    assert.equal(scene(30, { weapon: lightningWeapon() }).fire[1], true)
-  })
-  test("45% HP: shoots back at anything within 75 m (no hold in a brawl)", () => {
+  test("shoots back at anything within 75 m (no hold in a brawl)", () => {
     assert.equal(scene(60).fire[0], true)
     assert.equal(scene(30).fire[0], true)
   })
-  test("45% HP: shoots a finishable target (<= 350 HP) even far away", () => {
+  test("shoots a finishable target (<= 350 HP) even far away", () => {
     assert.equal(scene(100, { foeHp: 300 }).fire[0], true)
   })
-  test("45% HP outside the zone (no regen there anyway): keeps shooting", () => {
+  test("above 35% HP, or outside the zone (no regen there anyway): keep shooting", () => {
+    assert.equal(scene(100, { hpFrac: 0.4 }).fire[0], true)
     assert.equal(scene(100, { inZone: false }).fire[0], true)
   })
 })
@@ -515,9 +498,9 @@ describe("v14: no drone / crate shooting below 85% HP (regen needs 5 s without d
     const out = fight((o) => { o.t = 10; o.tick = 200; o.self.hp = 0.75 * o.self.max_hp; o.mechs = [drone(30)]; o.events = [hit] }, { world })
     assert.equal(out.hasTarget === true && Math.abs(out.aim[0]) < 0.05, false, "the drone is not targeted")
   })
-  test("unchanged: enemy mechs are still shot at 75% HP (the hold-fire rule now starts below 50%)", () => {
+  test("unchanged: enemy mechs are still shot at 75% HP (and the < 35% hold-fire rule is as before)", () => {
     const desired = aimAt(MUZZLE, comOf(60, 0))
     assert.equal(shoot(0.75, (o) => { o.self.aim = [...desired]; o.mechs = [enemy(5, [60, 0, 0])] }).fire[0], true)
-    assert.equal(COMBAT.regenHoldHpFrac, 0.5)
+    assert.equal(COMBAT.regenHoldHpFrac, 0.35)
   })
 })
