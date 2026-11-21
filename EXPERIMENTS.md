@@ -17,7 +17,10 @@ Every submission is a **single-variable experiment** (cap: 4 submissions per hou
 | --- | --- | --- | --- |
 | v1 submission A | 3fae0bf (BB-C7F0AB94) | **1.90** | Platform built the Dockerfile and passed check.py. 'wait 87 ms' shown on the page (meaning unconfirmed). |
 | v1 submission B (same commit) | _not run_ | | Skipped: we moved straight to Phase 2, so the noise threshold is still UNKNOWN. A Phase 2 delta smaller than ~0.3 cannot be told apart from luck. |
-| **Observed noise (abs gap)** | | | Keep threshold = ______ |
+| Same code twice (found in history) | 880a315 / 82a8b76 (docs-only) | 4.00 / 4.00 | Identical code -> identical score: the 48 practice seeds are fixed and scoring is deterministic. Re-submitting the same commit measures nothing. |
+| **noise-cal A (pre-registered, pending)** | e75655b (timingSalt 1, parent 219f397) | | Same strafe-flip (0.75-1.15 s) and hop (1.8-2.4 s) distributions as 219f397, drawn in a different order (replay: 41/300 ticks differ, all timing). Equal skill in expectation; different trajectories on the fixed seeds. |
+| **noise-cal B (pre-registered, pending)** | 7f95946 (timingSalt 2) | | As A with another order. |
+| **Observed noise (abs gap)** | | | Decision rule set BEFORE scoring: let s = sample SD of {4.38, A, B}. If s <= 0.03, past +-0.02..0.08 deltas were mostly real and the keep threshold stays 4.43. If s >= 0.10, those deltas were chaos: keep threshold becomes 4.38 + 2s, and every past "+0.02 keep" / "-0.02..-0.08 revert" is reclassified as inconclusive. In between: threshold 4.38 + 2s. Either way, if A or B beats 4.38 it is a legitimate equal-skill entry with a higher practice score (the qualification gate is the practice score). |
 
 ## Log
 
