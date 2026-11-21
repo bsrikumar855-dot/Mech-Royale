@@ -27,12 +27,8 @@ export const COMBAT = {
   rangeMargin: 0.9,
 
   // ---- kill-confirm focus (cost = HP left * (1 + dist / killDistScaleM) * product of (1 - bonus); lower wins)
-  /** Time-to-kill dominates: HP left first, distance second. Unknown HP counts as full mech HP.
-   * Submission 28: widened 100 -> 150, extending the upgrade-priority finding (submissions 24-26, three confirmed
-   * gains: kills drive placement here) into target SELECTION, not just upgrade choice. A bigger scale shrinks the
-   * distance term's relative weight, so time-to-kill dominates even more strongly: preferentially finish an
-   * already-weak enemy over a tankier one that is somewhat closer, rather than defaulting to whichever is nearest. */
-  killDistScaleM: 150,
+  /** Time-to-kill dominates: HP left first, distance second. Unknown HP counts as full mech HP. */
+  killDistScaleM: 100,
   /** An enemy at or below this HP is finishable (a laser release or a short gun burst). */
   killableHp: 350,
   /** We hold a laser and it carries a mortar: laser cook-off (+60%). */

@@ -85,14 +85,6 @@ describe("kill-confirm focus", () => {
     const out = fight((o) => (o.mechs = [enemy(5, [30, 0, 0]), enemy(6, [0, 45, 0], { charging: true })]))
     assert.ok(Math.abs(out.aim[0] - Math.PI / 2) < 0.02)
   })
-  test("submission 28: a farther, meaningfully weaker enemy now wins over a nearer tankier one", () => {
-    // Both beyond closeThreatM (50 m) and facing us (no rear-arc bonus either side): pure HP * (1 + dist/scale).
-    // cost(100 m scale): near/tanky 1400*1.6=2241 < far/weaker 900*2.6=2340 -> near used to win.
-    // cost(150 m scale): near/tanky 1400*1.4=1960 > far/weaker 900*2.067=1860 -> far/weaker wins now.
-    assert.equal(COMBAT.killDistScaleM, 150)
-    const out = fight((o) => (o.mechs = [enemy(5, [60, 0, 0], { hp: 1400, aim: [Math.PI, 0] }), enemy(6, [0, 160, 0], { hp: 900, aim: [-Math.PI / 2, 0] })]))
-    assert.ok(Math.abs(out.aim[0] - Math.PI / 2) < 0.02, `aims north at the farther, weaker mech: ${out.aim[0]}`)
-  })
 })
 
 describe("regen hold-fire (strict: < 35% HP, in zone, > 75 m, not finishable)", () => {
