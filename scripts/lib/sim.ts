@@ -160,6 +160,9 @@ export async function run(L: Loaded, o: SimOpts): Promise<SimResult> {
   const res: SimResult = { died: false, deathT: null, endT: t, hp, zoneDamage: 0, enemyDamage: 0, timeOutside: 0, minEnemyDist: Infinity, meanDistToFinalCentre: 0, finalPos: [x, y], trace: [], modes: {}, decideMs: [] }
   const dt = 0.05
   let tick = 0
+  /** events / sounds produced by enemy fire since the previous observation (the server reports them to us) */
+  let pendEvents: any[] = []
+  let pendSounds: any[] = []
   let distSum = 0
   let distN = 0
   const phaseAt = (tt: number) => ph.find((p: any) => tt < p.shrinkEnd) ?? ph[ph.length - 1]
@@ -200,9 +203,11 @@ export async function run(L: Loaded, o: SimOpts): Promise<SimResult> {
     obs.crates = []
     obs.cubes = []
     obs.pickups = []
-    obs.sounds = []
+    obs.sounds = pendSounds
     obs.beams = []
-    obs.events = []
+    obs.events = pendEvents
+    pendEvents = []
+    pendSounds = []
     obs.drops = []
     obs.offer = null
     obs.zone = { center: P.c0, radius: P.r0, next_center: P.c1, next_radius: P.r1, shrink_start: P.shrinkStart, shrink_end: P.shrinkEnd, dps: P.dps }
@@ -271,6 +276,13 @@ export async function run(L: Loaded, o: SimOpts): Promise<SimResult> {
           hp -= dmg
           res.enemyDamage += dmg
           lastDmg = t
+          const bearing = Math.atan2(e.y - y, e.x - x)
+          const ev = pendEvents.find((q) => q.by === e.id)
+          if (ev) ev.amount += dmg
+          else pendEvents.push({ type: "damaged", amount: dmg, weapon: "gun", bearing, by: e.id })
+        }
+        if (e.hitProb > 0 && d <= 320 && !pendSounds.some((q) => q.src === e.id)) {
+          pendSounds.push({ kind: "gun", bearing: Math.atan2(e.y - y, e.x - x), dist: d < 60 ? "near" : d < 160 ? "mid" : "far", age: 0.05, src: e.id })
         }
       }
       const c2 = circleAt(phaseAt(t), t)
