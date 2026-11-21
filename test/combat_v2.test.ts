@@ -11,7 +11,7 @@ import type { MapQuery } from "../src/world/map.ts"
 import type { Observation, Vec2, WeaponObs } from "../src/types/mechfight.ts"
 import { aimErrorRad, angleDiff } from "../src/world/geom.ts"
 import { WorldModel } from "../src/world/world.ts"
-import { cleanObs, ctxFor, enemy, fixtureHello, lightningWeapon, syntheticMap } from "./helpers.ts"
+import { cleanObs, ctxFor, enemy, fixtureHello, lightningWeapon, mortarWeapon, syntheticMap } from "./helpers.ts"
 
 const hello = fixtureHello()
 const laserStats = { ...(hello.config.weapons.laser as Record<string, number>) }
@@ -283,11 +283,11 @@ describe("economy: laser and supply drops", () => {
     assert.equal(out.take, undefined)
     assert.equal(out.lootTargets.length, 0)
   })
-  test("loot values: laser > lightning at the same distance; mortar never appears", () => {
+  test("loot values: laser > lightning at the same distance; mortar is a loot target too, into an empty slot", () => {
     const out = eco((o) => (o.pickups = [pickup(8002, "laser", 20), { ...pickup(8003, "lightning", 0), pos: [0, 20, 0] }, pickup(8004, "mortar", 5)]))
     const [lz, lt] = [out.lootTargets.find((t) => t.x === 20)!, out.lootTargets.find((t) => t.y === 20)!]
     assert.ok(lz.value > lt.value)
-    assert.equal(out.lootTargets.length, 2)
+    assert.equal(out.lootTargets.length, 3, "laser, lightning and mortar all want the same empty slot")
   })
   test("supply drops: uncontested, landing within 10 s, within 45 m", () => {
     const drop = (over: Partial<Observation["drops"][number]>) => ({ id: 20000, pos: [30, 0, 0] as [number, number, number], radius: 8, lands_in: 5, capture_s: 4, progress: 0, holder: null, ...over })
@@ -502,5 +502,59 @@ describe("v14: no drone / crate shooting below 85% HP (regen needs 5 s without d
     const desired = aimAt(MUZZLE, comOf(60, 0))
     assert.equal(shoot(0.75, (o) => { o.self.aim = [...desired]; o.mechs = [enemy(5, [60, 0, 0])] }).fire[0], true)
     assert.equal(COMBAT.regenHoldHpFrac, 0.35)
+  })
+})
+
+describe("mortar (v1): lobs at the same LOS mech target, never both weapons flat-and-lobbed in one tick", () => {
+  const withMortar = (o: Observation, w = mortarWeapon()): void => void (o.self.weapons = [o.self.weapons[0] ?? null, w])
+  /** Two passes: the first discovers the commanded lob aim, the second aligns the torso to it (no slew error left). */
+  const lobAt = (x: number, patch: (o: Observation) => void = () => {}) => {
+    const setup = (o: Observation) => { withMortar(o); o.mechs = [enemy(5, [x, 0, 0])]; patch(o) }
+    const first = fight(setup)
+    return fight((o) => { setup(o); o.self.aim = [...first.aim] })
+  }
+
+  test("fires once aligned, and the gun (slot 0) does NOT also fire that tick", () => {
+    const out = lobAt(60)
+    assert.equal(out.fire[1], true)
+    assert.equal(out.fire[0], false, "torso is committed to the lob, not the gun's flat lead")
+    assert.equal(out.hasTarget, true)
+  })
+
+  test("not yet aligned (no slew): no fire past the splash-forgiving tolerance, though the commanded aim is a real lob pitch", () => {
+    // Far enough (85 m, inside the 90 m cap) that the needed pitch exceeds even the splash-widened tolerance at zero slew.
+    const flat = fight((o) => {
+      withMortar(o)
+      o.mechs = [enemy(5, [85, 0, 0])]
+      o.self.stats = { ...o.self.stats, turn_rate: 0, pitch_rate: 0 }
+    })
+    assert.equal(flat.fire[1], false)
+    assert.ok(Math.abs(flat.aim[1]) > 0.1, "a lob needs real upward pitch, unlike the gun's near-flat lead")
+  })
+
+  test("on cooldown: never fires, regardless of alignment", () => {
+    const out = lobAt(60, (o) => void (o.self.weapons[1]!.cooldown = 1.0))
+    assert.equal(out.fire[1], false)
+  })
+
+  test("not enough energy for the drain (45): never fires", () => {
+    const out = lobAt(60, (o) => void (o.self.energy = 40))
+    assert.equal(out.fire[1], false)
+  })
+
+  test("beyond mortarMaxRangeM: never attempted, even though the gun/laser range would reach it", () => {
+    assert.ok(100 > COMBAT.mortarMaxRangeM, "sanity: 100 m is past the 90 m cap")
+    const out = lobAt(100)
+    assert.equal(out.fire[1], false)
+  })
+
+  test("never fires into our own blast: a target too close for the splash margin is refused even if aligned", () => {
+    const out = lobAt(8)
+    assert.equal(out.fire[1], false)
+  })
+
+  test("respects the same regen hold-fire as the gun: wounded, distant, unfinishable -> no lob either", () => {
+    const out = lobAt(80, (o) => { o.self.hp = 0.3 * o.self.max_hp; o.self.in_zone = true })
+    assert.equal(out.fire[1], false)
   })
 })

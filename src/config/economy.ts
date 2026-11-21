@@ -32,10 +32,11 @@ export const ECONOMY = {
   ] as readonly string[],
 
   /**
-   * Weapons we take, best first. Laser: 315 hitscan damage at 280 m, +60% cook-off on mortar carriers.
-   * Lightning: instant, 45 m cone. Mortar is still skipped (it exposes us to laser cook-off and we cannot lob yet).
+   * Weapons we take, best first. Laser: 315 hitscan damage at 280 m, +60% cook-off on mortar carriers. Lightning:
+   * instant, 45 m cone. Mortar: lobbed splash (combat/mortar.ts), lowest preference -- never worth swapping a laser
+   * or lightning away for, but a fine pickup into an empty slot.
    */
-  takeKinds: ["laser", "lightning"] as readonly string[],
+  takeKinds: ["laser", "lightning", "mortar"] as readonly string[],
 
   /** Swap lightning for a laser only when no visible enemy mech is closer than this (the swap costs equip time). */
   swapNoEnemyM: 30,
@@ -44,7 +45,7 @@ export const ECONOMY = {
   pickupVerticalM: 4,
 
   /** LootTarget value = base / (1 + distance / halfValueDistanceM): inversely scaled by distance. */
-  lootBaseValue: { cube: 10, lightning: 14, laser: 20, supply_drop: 30 } as Readonly<Record<string, number>>,
+  lootBaseValue: { cube: 10, lightning: 14, laser: 20, mortar: 14, supply_drop: 30 } as Readonly<Record<string, number>>,
   /** A supply drop is worth walking to once it lands within this many seconds, within this range, and nobody else holds it. */
   dropMaxLandsInS: 10,
   dropRangeM: 45,

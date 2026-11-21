@@ -95,6 +95,12 @@ export const lightningWeapon = (hello: Hello = fixtureHello()): NonNullable<Obse
   stats: { ...(hello.config.weapons.lightning as Record<string, number>) },
 })
 
+export const mortarWeapon = (hello: Hello = fixtureHello()): NonNullable<Observation["self"]["weapons"][1]> => ({
+  kind: "mortar",
+  cooldown: 0,
+  stats: { ...(hello.config.weapons.mortar as Record<string, number>) },
+})
+
 export function enemy(id: number, pos: [number, number, number], over: Partial<ActorObs> = {}): ActorObs {
   return { id, kind: "mech", pos, vel: [0, 0, 0], aim: [0, 0], hp: 1400, max_hp: 1400, weapons: ["gun"], charging: false, ...over }
 }

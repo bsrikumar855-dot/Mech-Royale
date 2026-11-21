@@ -44,6 +44,15 @@ export const COMBAT = {
   /** Hold fire only on targets farther than this that we cannot finish (hp > killableHp). */
   regenHoldDistM: 75,
 
+  // ---- mortar (v1): the same LOS mech target Combat already picked, never an unseen one (see combat/mortar.ts)
+  /** Conservative engagement cap: keeps the arc's flight time short, so the straight-line target-velocity
+   * prediction stays reasonable and the squad has less time to walk out of the blast before it lands. */
+  mortarMaxRangeM: 90,
+  /** Never fire if the computed impact point is this close (beyond the shell's own splash_radius) to US. */
+  mortarSafetyMarginM: 5,
+  /** Splash forgives a miss, but cap how loose the torso-alignment gate gets at point-blank range. */
+  mortarMaxAimErrorRad: 0.5,
+
   // ---- laser: hold to charge, release to fire (hitscan: no lead)
   /** Release once charged to this fraction of the full charge time (stats.charge): ~0.70 s of 0.75 s... */
   laserFullChargeFrac: 0.93,

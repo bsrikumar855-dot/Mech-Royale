@@ -44,22 +44,24 @@ describe("upgrade ranking and offer picking", () => {
   })
 })
 
-describe("weapon take rule: lightning only, into an empty slot, within reach", () => {
+describe("weapon take rule: laser, lightning or mortar, into an empty slot, within reach", () => {
   test("takes lightning when in reach and slot 1 is empty", () => {
     const o = cleanObs((x) => (x.pickups = [pickup(8001, "lightning", [2, 1, 0])]))
     assert.equal(decide(o).take, 8001)
   })
 
-  test("NEVER takes a mortar, even right at our feet, and it is never a loot target", () => {
+  test("takes a mortar into an empty slot (lowest preference, but still a loot target and a valid take)", () => {
     const o = cleanObs((x) => (x.pickups = [pickup(8001, "mortar", [0.5, 0, 0])]))
     const out = decide(o)
-    assert.equal(out.take, undefined)
-    assert.equal(out.lootTargets.length, 0)
+    assert.equal(out.take, 8001)
+    assert.equal(out.lootTargets.length, 1)
   })
 
-  test("a mixed pile: the laser beats lightning even when farther; the nearest of several lightnings otherwise", () => {
+  test("a mixed pile: the laser beats lightning and mortar even when farther; lightning beats a closer mortar", () => {
     const pile = cleanObs((x) => (x.pickups = [pickup(8001, "mortar", [1, 0, 0]), pickup(8002, "lightning", [0.5, 0, 0]), pickup(8004, "laser", [3, 0, 0])]))
     assert.equal(decide(pile).take, 8004)
+    const noLaser = cleanObs((x) => (x.pickups = [pickup(8001, "mortar", [0.5, 0, 0]), pickup(8002, "lightning", [3, 0, 0])]))
+    assert.equal(decide(noLaser).take, 8002)
     const two = cleanObs((x) => (x.pickups = [pickup(8002, "lightning", [3, 0, 0]), pickup(8003, "lightning", [2, 0, 0])]))
     assert.equal(decide(two).take, 8003)
   })
@@ -89,14 +91,14 @@ describe("weapon take rule: lightning only, into an empty slot, within reach", (
 })
 
 describe("LootTargets", () => {
-  test("cubes and wanted lightning pickups become targets; value falls with distance", () => {
+  test("cubes and wanted lightning/mortar pickups become targets; value falls with distance", () => {
     const o = cleanObs((x) => {
       x.cubes = [{ id: 5001, pos: [10, 0, 0] }, { id: 5002, pos: [40, 0, 0] }]
       x.pickups = [pickup(8001, "lightning", [10, 10, 0]), pickup(8002, "mortar", [5, 0, 0])]
     })
     const t = decide(o).lootTargets
     assert.equal(t.filter((l) => l.kind === "cube").length, 2)
-    assert.equal(t.filter((l) => l.kind === "weapon").length, 1, "only the lightning")
+    assert.equal(t.filter((l) => l.kind === "weapon").length, 2, "both the lightning and the mortar, now that mortar is taken too")
     const [near, far] = t.filter((l) => l.kind === "cube") as [(typeof t)[number], (typeof t)[number]]
     assert.ok(near.value > far.value, "nearer cube is worth more")
     assert.ok(near.value > 0 && far.value > 0)
