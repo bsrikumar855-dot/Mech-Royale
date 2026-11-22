@@ -184,7 +184,11 @@ describe("bullet, mortar and laser dodges", () => {
 })
 
 describe("anti-lead hops", () => {
-  test("hop under fire when grounded, then wait the 1.8-2.4 s interval", () => {
+  test("1f: hops disabled -> never jump, even under fire", { skip: L.antiLeadHops }, () => {
+    const r = new Runner()
+    for (let i = 0; i < 30; i++) assert.equal(r.step((o) => (o.mechs = [enemy(5, [60, 0, 0])])).out.jump, false)
+  })
+  test("hop under fire when grounded, then wait the 1.8-2.4 s interval", { skip: !L.antiLeadHops }, () => {
     const r = new Runner()
     const jumps: number[] = []
     for (let i = 0; i < 50; i++) if (r.step((o) => (o.mechs = [enemy(5, [60, 0, 0])])).out.jump) jumps.push(i)
@@ -199,7 +203,7 @@ describe("anti-lead hops", () => {
     assert.equal(once((o) => { o.mechs = [enemy(5, [60, 0, 0])]; o.projectiles = [{ id: 1, kind: "mortar", pos: [5, 0, 20], vel: [0, 0, 0] }] }).out.jump, false)
     assert.equal(once().out.jump, false)
   })
-  test("recent damage (2 s window) also allows a hop", () => {
+  test("recent damage (2 s window) also allows a hop", { skip: !L.antiLeadHops }, () => {
     assert.equal(once((o) => (o.events = [{ type: "damaged", amount: 45, weapon: "gun", bearing: 1, by: 9 }])).out.jump, true)
   })
 })
