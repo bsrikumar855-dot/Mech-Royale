@@ -18,9 +18,9 @@ describe("upgrade ranking and offer picking", () => {
     assert.deepEqual([...ECONOMY.upgradePriority].sort(), [...ids].sort(), "priority list and hello.config.upgrades must match exactly")
   })
 
-  test("submission 26: the whole weapon-damage snowball (gun + laser + lightning) now leads, then survivability, then regen/mobility: gun_rate > gun_damage > laser_damage > laser_charge > lightning_efficiency > armor > plating > nanites > servos", () => {
+  test("P4: sustained gun DPS order gun_mag > gun_damage > gun_rate, then the snowball: laser_damage > laser_charge > lightning_efficiency > armor > plating > nanites > servos", () => {
     const rank = (id: string): number => ECONOMY.upgradePriority.indexOf(id)
-    for (const [a, b] of [["gun_rate", "gun_damage"], ["gun_damage", "laser_damage"], ["laser_damage", "laser_charge"], ["laser_charge", "lightning_efficiency"], ["lightning_efficiency", "lightning_range"], ["lightning_range", "lightning_chain"], ["lightning_chain", "armor"], ["armor", "plating"], ["plating", "nanites"], ["nanites", "servos"], ["servos", "gun_mag"], ["sensors", "mortar_reload"]] as const) {
+    for (const [a, b] of [["gun_mag", "gun_damage"], ["gun_damage", "gun_rate"], ["gun_rate", "laser_damage"], ["laser_damage", "laser_charge"], ["laser_charge", "lightning_efficiency"], ["lightning_efficiency", "lightning_range"], ["lightning_range", "lightning_chain"], ["lightning_chain", "armor"], ["armor", "plating"], ["plating", "nanites"], ["nanites", "servos"], ["sensors", "mortar_reload"]] as const) {
       assert.ok(rank(a) < rank(b), `${a} should outrank ${b}`)
     }
   })
@@ -30,7 +30,7 @@ describe("upgrade ranking and offer picking", () => {
     assert.equal(bestUpgradeIndex([choice("lightning_chain"), choice("gun_rate"), choice("jets")]), 1)
     assert.equal(bestUpgradeIndex([choice("mortar_splash"), choice("sensors"), choice("jets")]), 1)
     const o = cleanObs((x) => (x.offer = { id: 1, expires: 99, choices: [choice("gun_velocity"), choice("plating"), choice("gun_mag")] }))
-    assert.equal(decide(o).pick, 1)
+    assert.equal(decide(o).pick, 2, "P4: gun_mag (+31% sustained DPS) leads")
   })
 
   test("an unranked id never beats a ranked one; all-unranked and ties fall back to the first choice", () => {
