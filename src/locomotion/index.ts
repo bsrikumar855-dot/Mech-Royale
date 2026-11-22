@@ -229,7 +229,8 @@ export class EvasiveLocomotion implements Locomotion {
       // v5 post-kill scoop: no shot line on us -> cubes up to 25 m; one shooter -> a cube within 14 m above 45% HP
       const scoopR = sn.losCount === 0 ? L.scoopNoLosM : sn.losCount === 1 && hpFrac > L.scoopOneLosMinHpFrac ? L.scoopOneLosM : 0
       const loot = close18 ?? (scoopR > 0 ? this.pickLoot(world, inSafe, scoopR, { cubesOnly: true }) : null)
-      if (sn.losCount >= 2 || hpFrac < L.woundedHpFrac) {
+      const retreatAt = L.retreatByCount ? L.retreatHpFracByCount[Math.min(Math.max(sn.losCount, 1), L.retreatHpFracByCount.length) - 1]! : L.woundedHpFrac
+      if (L.retreatByCount ? hpFrac < retreatAt : sn.losCount >= 2 || hpFrac < L.woundedHpFrac) {
         mode = "retreat"
         dir = norm(add(perp, towardThreat, L.retreatBlend))
       } else if (close) {
@@ -239,7 +240,7 @@ export class EvasiveLocomotion implements Locomotion {
         mode = "loot"
         const tl = toward(loot.x, loot.y)
         dir = tl ? norm(add(tl, perp, L.lootWeave)) : perp
-      } else if (sn.bearingDist > L.farM && hpFrac > L.approachMinHpFrac && inSafe(px, py)) {
+      } else if (sn.bearingDist > L.farM && hpFrac > L.approachMinHpFrac && sn.losCount <= 1 && inSafe(px, py)) {
         mode = "approach"
         dir = norm(add(perp, towardThreat, L.approachBlend))
       } else {

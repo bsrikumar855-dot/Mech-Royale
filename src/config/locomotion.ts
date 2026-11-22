@@ -67,6 +67,13 @@ export const LOCOMOTION = {
   closeLightningM: 52,
   farM: 95,
   approachMinHpFrac: 0.65,
+  /**
+   * Retreat by shooter count (experiment "retreat-count"): retreat while under fire when HP is below the fraction for
+   * the number of enemies with a shot line on us (index = min(count, 3) - 1): 1 -> 35%, 2 -> 55%, 3+ -> 80%. Off = the
+   * 5ceea9a rule (any 2+ shooters, or below woundedHpFrac). Approach still needs at most one shooter.
+   */
+  retreatByCount: true as boolean,
+  retreatHpFracByCount: [0.35, 0.55, 0.8] as readonly number[],
   /** Any move whose 4 m lookahead leaves the safe rim is bent back inward. */
   rimLookaheadM: 4,
 
