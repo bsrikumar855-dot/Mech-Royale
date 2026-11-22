@@ -167,6 +167,25 @@ export const LOCOMOTION = {
    */
   unstickLookaheadM: 30,
   unstickRadiusM: 6,
+
+  /**
+   * P5 physical stuck escape. The feeler models the body footprint against buildings but terrain only under the
+   * centre line, so along a steep bank (the stadium bowl) it can call a heading open while the body is wedged:
+   * forensics found runs of up to 87 s pushing into a bank (3 of 4 such matches ended in a zone death). Truth is the
+   * server's own velocity: commanded |move| >= stuckCmdMin while grounded and slower than stuckSpeedMaxMps for
+   * stuckDecisions decisions in a row -> for stuckEscapeS, jump and jet (boost in the air, protocol: jump and jet to clear
+   * a ledge) along the last heading rotated by the next stuckEscapeDeg entry; flip the patrol side and ban the loot
+   * target we were walking to for stuckLootBanS.
+   */
+  stuckEscape: true as boolean,
+  stuckCmdMin: 0.5,
+  stuckSpeedMaxMps: 2,
+  stuckDecisions: 8,
+  stuckEscapeS: 1,
+  stuckEscapeDeg: [90, -90, 180, 45, -45] as readonly number[],
+  stuckJetMinEnergy: 20,
+  stuckLootBanS: 20,
+  stuckLootBanM: 4,
 } as const
 
 export const MAP = {

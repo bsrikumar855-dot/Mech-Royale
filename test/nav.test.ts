@@ -7,6 +7,8 @@ import { Navigator } from "../src/nav/index.ts"
 import { MapQuery, type WorldJson } from "../src/world/map.ts"
 import { WorldModel } from "../src/world/world.ts"
 import { cleanObs, ctxFor, fixtureHello } from "./helpers.ts"
+/** the mech moves as commanded (the P5 stuck detector reads the server-reported velocity) */
+const WALK = (fixtureHello().config.mech as Record<string, number>).walk_speed!
 
 const BODY = { radius: 2.5, height: 9, stepUp: 1.2, maxSlopeDeg: 50 }
 const rect = (x0: number, y0: number, x1: number, y1: number): number[] => [x0, y0, x1, y0, x1, y1, x0, y1]
@@ -149,10 +151,11 @@ describe("Navigator", () => {
 describe("Locomotion zone modes use the planned path", () => {
   const hello = fixtureHello()
   /** We stand in the pocket OUTSIDE a zone whose circle is north of the U. */
-  const obsAt = (t: number, tick: number) =>
+  const obsAt = (t: number, tick: number, vel: readonly number[] = [0, 0]) =>
     cleanObs((o) => {
       o.t = t
       o.tick = tick
+      o.self.vel = [vel[0]! * WALK, vel[1]! * WALK, 0]
       o.self.pos = [0, 0, 0]
       o.self.in_zone = false
       o.zone = { center: [0, 60], radius: 12, next_center: [0, 60], next_radius: 12, shrink_start: 1e6, shrink_end: 1e6 + 1, dps: 100 }
@@ -163,7 +166,7 @@ describe("Locomotion zone modes use the planned path", () => {
     const loco = new EvasiveLocomotion()
     const world = new WorldModel(hello)
     let move: [number, number] = [0, 0]
-    for (let k = 0; k < 40; k++) move = loco.decide(ctxFor(obsAt(10 + k * 0.1, 200 + k * 2), map, world), []).move
+    for (let k = 0; k < 40; k++) move = loco.decide(ctxFor(obsAt(10 + k * 0.1, 200 + k * 2, move), map, world), []).move
     assert.equal(loco.lastMode, "outside")
     assert.ok(move[1] < -0.2, `expected a southbound exit heading, got ${move}`)
   })
@@ -213,10 +216,11 @@ describe("Locomotion unstick: steer() being boxed in falls back to the planned p
   const hello = fixtureHello()
   /** Healthy, safe, no threats, dead centre of the alcove, heading north into its wall for a cube loot target
    * beyond it: not a zone mode at all. */
-  const obsAt = (t: number, tick: number) =>
+  const obsAt = (t: number, tick: number, vel: readonly number[] = [0, 0]) =>
     cleanObs((o) => {
       o.t = t
       o.tick = tick
+      o.self.vel = [vel[0]! * WALK, vel[1]! * WALK, 0]
       o.self.pos = [0, 0, 0]
       o.self.in_zone = true
       o.zone = { center: [1000, 1000], radius: 2000, next_center: [1000, 1000], next_radius: 2000, shrink_start: 1e6, shrink_end: 1e6 + 1, dps: 100 }
@@ -236,7 +240,7 @@ describe("Locomotion unstick: steer() being boxed in falls back to the planned p
     const loco = new EvasiveLocomotion()
     const world = new WorldModel(hello)
     let move: [number, number] = [0, 0]
-    for (let k = 0; k < 60; k++) move = loco.decide(ctxFor(obsAt(10 + k * 0.1, 200 + k * 2), map, world), []).move
+    for (let k = 0; k < 60; k++) move = loco.decide(ctxFor(obsAt(10 + k * 0.1, 200 + k * 2, move), map, world), []).move
     assert.equal(loco.lastMode, "loot")
     assert.ok(move[1] < -0.2, `expected a southbound exit heading once the field settles, got ${move}`)
   })
