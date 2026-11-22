@@ -12,7 +12,7 @@
  *  7. idle                        -> wounded: hold still for regen; healthy: patrol the next circle's mid band
  * Every heading goes through a wall feeler with side commitment. All numbers: src/config/locomotion.ts.
  */
-import { LOCOMOTION as L, NAV } from "../config/index.ts"
+import { ECONOMY, LOCOMOTION as L, NAV } from "../config/index.ts"
 import type { Locomotion, LocomotionOutput, LootTarget, TickContext } from "../types/contracts.ts"
 import type { Vec2, Vec3 } from "../types/mechfight.ts"
 import { angleDiff, clamp, dist2d, unit2, yawTo } from "../world/geom.ts"
@@ -400,7 +400,7 @@ export class EvasiveLocomotion implements Locomotion {
         if ((d.holder === null || d.holder === self.id) && d.lands_in <= L.dropMaxLandsInS) consider(d.pos[0], d.pos[1], "supply_drop", hunt ? L.huntDropRangeM : L.dropRangeM, d.radius)
       }
       for (const pk of obs.pickups ?? []) {
-        if (pk.kind === "laser" && !held.includes("laser")) consider(pk.pos[0], pk.pos[1], "laser", hunt ? L.huntLaserRangeM : L.laserPickupRangeM)
+        if (pk.kind === "laser" && !ECONOMY.noLaser && !held.includes("laser")) consider(pk.pos[0], pk.pos[1], "laser", hunt ? L.huntLaserRangeM : L.laserPickupRangeM)
         else if (pk.kind === "lightning" && emptySlot && !held.includes("lightning") && !held.includes("laser")) consider(pk.pos[0], pk.pos[1], "lightning", L.lightningPickupRangeM)
       }
     }
@@ -433,7 +433,7 @@ export class EvasiveLocomotion implements Locomotion {
     const listed = new Set<number>()
     for (const p of obs.pickups ?? []) {
       listed.add(p.id)
-      if (p.kind === "laser" || p.kind === "lightning") mem.set(p.id, { x: p.pos[0], y: p.pos[1], z: p.pos[2], kind: p.kind, seenT: t })
+      if ((p.kind === "laser" && !ECONOMY.noLaser) || p.kind === "lightning") mem.set(p.id, { x: p.pos[0], y: p.pos[1], z: p.pos[2], kind: p.kind, seenT: t })
     }
     if (mem.size === 0) return
     const self = world.self

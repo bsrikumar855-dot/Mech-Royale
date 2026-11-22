@@ -35,11 +35,13 @@ const hasEmptySlot = (self: SelfObs): boolean => self.weapons.some((w) => w === 
 
 /** Would we pick this up into an empty slot? (a kind we take, a free slot, not already held) */
 export function wantsPickup(self: SelfObs, p: PickupObs): boolean {
+  if (ECONOMY.noLaser && p.kind === "laser") return false
   return ECONOMY.takeKinds.includes(p.kind) && hasEmptySlot(self) && !heldKinds(self).includes(p.kind)
 }
 
 /** Would we swap our lightning for this pickup? (a laser, both slots full, holding lightning, no laser yet) */
 export function wantsSwap(self: SelfObs, p: PickupObs): boolean {
+  if (ECONOMY.noLaser) return false
   const held = heldKinds(self)
   return p.kind === "laser" && !hasEmptySlot(self) && held.includes("lightning") && !held.includes("laser")
 }

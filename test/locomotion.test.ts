@@ -1,7 +1,7 @@
 /** Locomotion v3: anti-lead A-D strafing, projectile / mortar / laser dodges, hops, zone, loot, patrol, wall feeler. */
 import assert from "node:assert/strict"
-import { describe, test } from "node:test"
-import { LOCOMOTION as L } from "../src/config/index.ts"
+import { after, before, describe, test } from "node:test"
+import { LOCOMOTION as L, ECONOMY } from "../src/config/index.ts"
 import { EvasiveLocomotion } from "../src/locomotion/index.ts"
 import { LocoState } from "../src/locomotion/state.ts"
 import { blockedAhead, steer } from "../src/locomotion/steer.ts"
@@ -10,6 +10,12 @@ import type { Observation, WeaponObs } from "../src/types/mechfight.ts"
 import type { MapQuery } from "../src/world/map.ts"
 import { WorldModel } from "../src/world/world.ts"
 import { cleanObs, enemy, fixtureHello, fixtureObs, HAS_ARENA, lightningWeapon, realMap, syntheticMap } from "./helpers.ts"
+
+// These tests pin the 5ceea9a laser pickup rules; the mobility build (ECONOMY.noLaser) is covered in mobility.test.ts.
+const laserCfg = ECONOMY as { noLaser: boolean }
+const laserSaved = laserCfg.noLaser
+before(() => { laserCfg.noLaser = false })
+after(() => { laserCfg.noLaser = laserSaved })
 
 const hello = fixtureHello()
 const mag = (v: readonly number[]): number => Math.hypot(v[0]!, v[1]!)

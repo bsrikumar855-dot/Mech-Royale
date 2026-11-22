@@ -1,9 +1,15 @@
 import assert from "node:assert/strict"
-import { describe, test } from "node:test"
+import { after, before, describe, test } from "node:test"
 import { ECONOMY } from "../src/config/index.ts"
 import { bestUpgradeIndex, RuleEconomy } from "../src/economy/index.ts"
 import type { Observation, PickupObs, WeaponKind } from "../src/types/mechfight.ts"
 import { cleanObs, ctxFor, fixtureHello, lightningWeapon } from "./helpers.ts"
+
+// These tests pin the 5ceea9a laser pickup rules; the mobility build (ECONOMY.noLaser) is covered in mobility.test.ts.
+const laserCfg = ECONOMY as { noLaser: boolean }
+const laserSaved = laserCfg.noLaser
+before(() => { laserCfg.noLaser = false })
+after(() => { laserCfg.noLaser = laserSaved })
 
 const choice = (id: string) => ({ id, name: id, desc: "" })
 const pickup = (id: number, kind: WeaponKind, pos: [number, number, number]): PickupObs => ({ id, kind, pos })

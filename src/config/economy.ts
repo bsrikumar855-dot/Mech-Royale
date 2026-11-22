@@ -43,6 +43,12 @@ export const ECONOMY = {
    * Lightning: instant, 45 m cone. Mortar is still skipped (it exposes us to laser cook-off and we cannot lob yet).
    */
   takeKinds: ["laser", "lightning"] as readonly string[],
+  /**
+   * Mobility build (experiment "mobility"): never take, swap for, walk to or hunt a laser. Charging a laser halves our
+   * speed (charge_move_mult 0.5) for 0.75 s per shot, which blunts the predictive dodge, our one proven lever; the
+   * second slot goes to lightning (instant, 45 m cone, chains between the squad's clustered bots). Off = 5ceea9a.
+   */
+  noLaser: true as boolean,
 
   /** Swap lightning for a laser only when no visible enemy mech is closer than this (the swap costs equip time). */
   swapNoEnemyM: 30,
