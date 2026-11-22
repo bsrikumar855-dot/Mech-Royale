@@ -162,7 +162,10 @@ describe("laser: hold to charge, release to fire", () => {
     assert.equal(charging(limit + 0.01, { off: 0.3 }).fire[1], false)
     assert.equal(charging(limit - 0.2, { off: 0.3 }).fire[1], true)
   })
-  test("target lost mid-charge: holds briefly (0.3 s), then releases instead of crawling at half speed", () => {
+  test("pre-charge OFF: target lost mid-charge holds briefly (0.3 s), then releases instead of crawling at half speed", () => {
+    const saved = COMBAT.laserPrecharge
+    ;(COMBAT as { laserPrecharge: boolean }).laserPrecharge = false
+    try {
     const combat = new RuleCombat()
     const world = new WorldModel(hello)
     const tick = (t: number, mechs: boolean) =>
@@ -170,6 +173,29 @@ describe("laser: hold to charge, release to fire", () => {
     assert.equal(tick(10, true).fire[1], true)
     assert.equal(tick(10.2, false).fire[1], true, "0.2 s without LOS: keep it")
     assert.equal(tick(10.4, false).fire[1], false, "0.4 s: release")
+    } finally {
+      ;(COMBAT as { laserPrecharge: boolean }).laserPrecharge = saved
+    }
+  })
+  test("pre-charge ON: target lost mid-charge but still remembered -> keep holding (fire the moment it re-appears)", () => {
+    const combat = new RuleCombat()
+    const world = new WorldModel(hello)
+    const tick = (t: number, mechs: boolean, charge: number) =>
+      fight((o) => { o.t = t; o.tick = Math.round(t * 20); withLaser(o, laser({ charge })); o.self.aim = [2, 0]; o.mechs = mechs ? [enemy(5, [100, 0, 0])] : [] }, { combat, world })
+    assert.equal(tick(10, true, 0.4).fire[1], true)
+    assert.equal(tick(10.4, false, 0.8).fire[1], true, "0.4 s unseen, enemy remembered: still holding")
+    assert.equal(tick(10.8, false, 2.6).fire[1], false, "at the auto-fire limit: release")
+  })
+  test("pre-charge ON: no shot line and no target, but an enemy seen 1 s ago in range -> start charging", () => {
+    const combat = new RuleCombat()
+    const world = new WorldModel(hello)
+    fight((o) => { o.t = 10; o.tick = 200; withLaser(o, laser({ charge: 0 })); o.mechs = [enemy(5, [100, 0, 0])] }, { combat, world })
+    const out = fight((o) => { o.t = 11; o.tick = 220; withLaser(o, laser({ charge: 0 })); o.mechs = [] }, { combat, world })
+    assert.equal(out.fire[1], true)
+  })
+  test("pre-charge ON: nobody seen recently -> no charge", () => {
+    const out = fight((o) => { o.t = 50; o.tick = 1000; withLaser(o, laser({ charge: 0 })); o.mechs = [] })
+    assert.equal(out.fire[1], false)
   })
   test("releases right before the target slips behind cover", () => {
     // synthetic map: building A at x 0..10, y 0..10; we stand at (-20,-20); the target crosses north behind it
