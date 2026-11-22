@@ -70,6 +70,28 @@ export const LOCOMOTION = {
   /** Any move whose 4 m lookahead leaves the safe rim is bent back inward. */
   rimLookaheadM: 4,
 
+  // ---- predictive bullet evasion (src/locomotion/evade.ts, experiment "evade-v2": evade on top of hops off)
+  /** Master switch (false = the 286d48c behaviour exactly). */
+  evadeEnabled: true,
+  /** Candidate headings (plus stop and the wanted heading). */
+  evadeHeadings: 16,
+  /** Prediction step and the longest look-ahead (a bullet farther than this in time is ignored this tick). */
+  evadeStepS: 0.05,
+  evadeHorizonS: 0.8,
+  /** Extra clearance added to body radius + projectile radius (aim / prediction error). */
+  evadeMarginM: 0.4,
+  /** Bullets farther than this are ignored (0.8 s at 252 m/s is ~200 m). */
+  evadeMaxBulletDistM: 210,
+  /** Times at which a candidate path is checked against walls (blocked = we stop there). */
+  evadeWallChecksS: [0.15, 0.35, 0.6] as readonly number[],
+  /** Cost of deviating from the wanted heading, in damage points at 180 degrees. */
+  evadeDeviationWeight: 30,
+  evadeBoostCost: 4,
+  evadeJumpCost: 6,
+  evadeBoostMinEnergy: 20,
+  /** No jump candidates: airborne accel is 12 vs 58.5 on the ground (the 286d48c hops-off finding). */
+  evadeAllowJump: false,
+
   // ---- hops
   /** 1f: anti-lead hops under fire. Airborne we accelerate at air_accel (12) not ground_accel (58.5): no strafe/dodge. */
   antiLeadHops: false as boolean,
