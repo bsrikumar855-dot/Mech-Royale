@@ -558,4 +558,34 @@ describe("P5: physical stuck escape (server velocity, not our map model)", () =>
     r.t += L.stuckEscapeS + 0.1
     assert.notEqual(r.step(cube).mode, "loot", "banned")
   })
+  test("the drop-ring micro-strafe (slow on purpose) never triggers, even if the server shows us standing still", () => {
+    const r = new Runner()
+    for (let i = 0; i < 3 * L.stuckDecisions; i++) {
+      const x = wedged(r, (o) => (o.drops = [{ id: 20000, pos: [3, 0, 0], radius: 8, lands_in: 0, capture_s: 4, progress: 0, holder: null }]))
+      assert.equal(x.mode, "loot")
+      assert.equal(x.state.escapes, 0)
+    }
+  })
+  test("half speed while our laser charges (charge_move_mult) never triggers", () => {
+    const r = new Runner()
+    for (let i = 0; i < 3 * L.stuckDecisions; i++) {
+      const x = wedged(r, (o) => (o.self.weapons = [o.self.weapons[0] ?? null, laser(0.3)]))
+      assert.ok(mag(x.out.move) > 0.5, "still commanding a full move")
+      assert.equal(x.state.escapes, 0)
+    }
+  })
+  test("moving at a third of the commanded speed is not stuck; under a quarter is", () => {
+    const walk = (hello.config.mech as Record<string, number>).walk_speed!
+    const slow = (frac: number) => {
+      const r = new Runner()
+      let x = r.step()
+      for (let i = 0; i <= L.stuckDecisions; i++) {
+        const mv = x.out.move
+        x = r.step((o) => (o.self.vel = [mv[0]! * walk * frac, mv[1]! * walk * frac, 0]))
+      }
+      return x.state.escapes
+    }
+    assert.equal(slow(0.33), 0)
+    assert.equal(slow(0.2), 1)
+  })
 })

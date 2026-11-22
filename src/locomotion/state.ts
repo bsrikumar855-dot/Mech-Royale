@@ -39,6 +39,8 @@ export class LocoState {
 
   /** P5 stuck escape: last commanded move, consecutive stuck decisions, the active escape and loot bans. */
   lastCmdMag = 0
+  /** commanded horizontal speed (m/s) of the last move */
+  lastCmdSpeed = 0
   lastCmdDir: Vec2 | null = null
   stuckN = 0
   escapes = 0
@@ -60,6 +62,7 @@ export class LocoState {
     this.isBoosting = false
     this.patrolSign = 1
     this.lastCmdMag = 0
+    this.lastCmdSpeed = 0
     this.lastCmdDir = null
     this.stuckN = 0
     this.escapes = 0
