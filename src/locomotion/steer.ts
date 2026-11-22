@@ -17,18 +17,32 @@ export function bodyOf(world: WorldModel): { radius: number; height: number; ste
   return { radius: world.selfStat("radius", world.rules.radius), height: world.selfStat("height", world.rules.height), stepUp: world.rules.stepUp }
 }
 
-/** Is walking along unit heading `d` blocked within `dist` (map edge, a slope we cannot climb, a wall)? */
+/**
+ * Is walking along unit heading `d` blocked within `dist` (map edge, a ledge or slope we cannot climb, a wall)?
+ * Walks the segment in NAV-free steps of feelerSampleM, carrying the feet height along the ground the way the server
+ * moves us: a rise of more than step_up between two samples, or a climb steeper than max_slope_deg, is a wall
+ * (protocol section 7). The old two-probe check only called terrain a wall when the probe point ITSELF was steeper
+ * than 50 deg, so the flat top of an embankment read as open and the mech pushed into its face indefinitely.
+ */
 export function blockedAhead(map: MapQuery, world: WorldModel, d: Vec2, dist: number = L.feelerStepM): boolean {
   const [x, y, z] = world.self.pos
   const body = bodyOf(world)
   const b = map.bounds
-  for (const k of [0.5, 1]) {
-    const qx = x + d[0] * dist * k
-    const qy = y + d[1] * dist * k
+  const step = L.feelerSampleM
+  const maxRise = Math.tan(world.rules.maxSlopeDeg * DEG) * step
+  let fz = z
+  let prevGround = map.heightAt(x, y)
+  for (let s = step; s <= dist + 1e-9; s += step) {
+    const qx = x + d[0] * s
+    const qy = y + d[1] * s
     if (qx < b.minX + body.radius || qx > b.maxX - body.radius || qy < b.minY + body.radius || qy > b.maxY - body.radius) return true
     const ground = map.heightAt(qx, qy)
-    if (ground > z + body.stepUp && map.slopeDegAt(qx, qy) > world.rules.maxSlopeDeg) return true
-    if (map.isBlockedAt(qx, qy, Math.max(z, ground), body)) return true
+    // terrain: a ledge (more than step_up above our feet) or a climb steeper than the walkable slope
+    if (ground > fz + body.stepUp) return true
+    if (ground > fz && ground - prevGround > maxRise) return true
+    prevGround = ground
+    fz = map.standingHeightAt(qx, qy, fz, body.stepUp, body.height)
+    if (map.isBlockedAt(qx, qy, fz, body)) return true
   }
   return false
 }

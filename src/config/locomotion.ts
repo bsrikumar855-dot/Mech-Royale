@@ -151,6 +151,8 @@ export const LOCOMOTION = {
 
   // ---- wall feeler
   feelerStepM: 4,
+  /** The feeler walks its probe in steps of this length, following the ground (ledge / slope detection). */
+  feelerSampleM: 0.5,
   steerAnglesDeg: [30, 60, 90, 120] as readonly number[],
   /** Once we steer around a wall to one side, prefer that side for this long (no oscillation). */
   wallCommitS: 1.5,

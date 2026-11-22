@@ -37,6 +37,24 @@ export interface SimOpts {
   untilT?: number
   /** override the zone phase table (tests) */
   zoneOverride?: any[]
+  /** called after every decision (audits): state BEFORE the action is applied */
+  onDecision?: (d: Decision) => void
+}
+
+export interface Decision {
+  t: number
+  x: number
+  y: number
+  aim: number
+  act: any
+  mode: string
+  inZone: boolean
+  circle: { c: [number, number]; r: number }
+  /** match time of the last enemy damage we took (-Infinity if none) */
+  lastHitT: number
+  /** the enemy that last damaged us, if any */
+  lastHitBy: { x: number; y: number } | null
+  hp: number
 }
 
 export interface SimResult {
@@ -162,6 +180,8 @@ export async function run(L: Loaded, o: SimOpts): Promise<SimResult> {
   let tick = 0
   /** events / sounds produced by enemy fire since the previous observation (the server reports them to us) */
   let pendEvents: any[] = []
+  let lastHitT = Number.NEGATIVE_INFINITY
+  let lastHitBy: { x: number; y: number } | null = null
   let pendSounds: any[] = []
   let distSum = 0
   let distN = 0
@@ -215,6 +235,7 @@ export async function run(L: Loaded, o: SimOpts): Promise<SimResult> {
     const act = bot.decide(obs, L.NO_DEADLINE)
     res.decideMs.push(performance.now() - tDecide)
     const mode = (bot.modules.locomotion as any).lastMode ?? "?"
+    o.onDecision?.({ t, x, y, aim, act, mode, inZone, circle: circ, lastHitT, lastHitBy, hp })
     res.modes[mode] = (res.modes[mode] ?? 0) + 1
     if (tick % 10 === 0) res.trace.push({ t, x, y, mode, inZone, hp })
     tick += 2
@@ -277,6 +298,8 @@ export async function run(L: Loaded, o: SimOpts): Promise<SimResult> {
           res.enemyDamage += dmg
           lastDmg = t
           const bearing = Math.atan2(e.y - y, e.x - x)
+          lastHitT = t
+          lastHitBy = { x: e.x, y: e.y }
           const ev = pendEvents.find((q) => q.by === e.id)
           if (ev) ev.amount += dmg
           else pendEvents.push({ type: "damaged", amount: dmg, weapon: "gun", bearing, by: e.id })
