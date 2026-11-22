@@ -190,18 +190,34 @@ describe("anti-lead hops", () => {
 })
 
 describe("crossfire and wounded retreat with a latched boost", () => {
-  test("2 enemies with line of sight: retreat (away from the nearest) with boost", () => {
-    const r = once((o) => { o.self.energy = 50; o.mechs = [enemy(5, [100, 0, 0]), enemy(6, [0, 120, 0])] })
+  test("2 enemies with line of sight below 55% HP: retreat (away from the nearest) with boost", () => {
+    const r = once((o) => { o.self.energy = 50; o.self.hp = o.self.max_hp * 0.5; o.mechs = [enemy(5, [100, 0, 0]), enemy(6, [0, 120, 0])] })
     assert.equal(r.mode, "retreat")
     assert.ok(r.out.move[0] < -0.3, "away from the nearest (east) threat")
     assert.equal(r.out.boost, true)
   })
-  test("wounded (< 42% HP) 1v1 also retreats", () => {
-    assert.equal(once((o) => { o.self.hp = o.self.max_hp * 0.4; o.mechs = [enemy(5, [60, 0, 0])] }).mode, "retreat")
+  test("retreat by shooter count: 1 -> below 35%, 2 -> below 55%, 3+ -> below 80% HP", () => {
+    const at = (frac: number, n: number) =>
+      once((o) => { o.self.hp = o.self.max_hp * frac; o.mechs = [enemy(5, [60, 0, 0]), enemy(6, [0, 70, 0]), enemy(7, [-80, 0, 0])].slice(0, n) }).mode
+    assert.equal(at(0.3, 1), "retreat")
+    assert.notEqual(at(0.4, 1), "retreat", "1v1 at 40% keeps fighting (was retreat below 42%)")
+    assert.equal(at(0.5, 2), "retreat")
+    assert.notEqual(at(1, 2), "retreat", "2 shooters at full HP keep fighting (was always retreat)")
+    assert.equal(at(0.7, 3), "retreat")
+    assert.notEqual(at(0.9, 3), "retreat")
+    assert.notEqual(once((o) => { o.mechs = [enemy(5, [100, 0, 0]), enemy(6, [0, 120, 0])] }).mode, "approach", "never approach with 2 shooters")
+    const cfg = L as { retreatByCount: boolean }
+    cfg.retreatByCount = false
+    try {
+      assert.equal(at(0.4, 1), "retreat", "off switch: the 5ceea9a 42% rule")
+      assert.equal(at(1, 2), "retreat", "off switch: any 2 shooters")
+    } finally {
+      cfg.retreatByCount = true
+    }
   })
   test("boost latch: starts at >= 30 energy, holds down to 15, then stops", () => {
     const r = new Runner()
-    const at = (e: number) => r.step((o) => { o.self.energy = e; o.mechs = [enemy(5, [100, 0, 0]), enemy(6, [0, 120, 0])] }).out.boost
+    const at = (e: number) => r.step((o) => { o.self.energy = e; o.self.hp = o.self.max_hp * 0.5; o.mechs = [enemy(5, [100, 0, 0]), enemy(6, [0, 120, 0])] }).out.boost
     assert.equal(at(25), false, "25 < start")
     assert.equal(at(35), true)
     assert.equal(at(20), true, "latched")
@@ -508,7 +524,8 @@ describe("v5: post-kill cube scoop under fire", () => {
   })
   test("two shooters: never scoops (crossfire retreat wins)", () => {
     const r = once((o) => { o.mechs = [enemy(5, [60, 0, 0]), enemy(6, [0, 60, 0])]; o.cubes = [{ id: 5001, pos: [0, -8, 0] }] })
-    assert.equal(r.mode, "retreat")
+    assert.notEqual(r.mode, "loot", "full HP: keeps fighting, still no scoop")
+    assert.equal(once((o) => { o.self.hp = o.self.max_hp * 0.5; o.mechs = [enemy(5, [60, 0, 0]), enemy(6, [0, 60, 0])]; o.cubes = [{ id: 5001, pos: [0, -8, 0] }] }).mode, "retreat")
   })
 })
 
