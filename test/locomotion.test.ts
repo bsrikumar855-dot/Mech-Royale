@@ -1,7 +1,7 @@
 /** Locomotion v3: anti-lead A-D strafing, projectile / mortar / laser dodges, hops, zone, loot, patrol, wall feeler. */
 import assert from "node:assert/strict"
-import { describe, test } from "node:test"
-import { LOCOMOTION as L } from "../src/config/index.ts"
+import { after, before, describe, test } from "node:test"
+import { COMBAT, LOCOMOTION as L } from "../src/config/index.ts"
 import { EvasiveLocomotion } from "../src/locomotion/index.ts"
 import { LocoState } from "../src/locomotion/state.ts"
 import { blockedAhead, steer } from "../src/locomotion/steer.ts"
@@ -403,6 +403,11 @@ describe("integration", () => {
 
 // ------------------------------------------------------------------ v5: early snowball rush
 describe("v5: crate and drone hunting (snowball gate)", () => {
+  // pins the 5ceea9a drone-farming rules (85% HP, 35 m standoff, 40 m engage); farm-45 is in farm_outside_aggro.test.ts
+  const farmCfg = COMBAT as { farmOutsideAggro: boolean }
+  let farmSaved = true
+  before(() => { farmSaved = farmCfg.farmOutsideAggro; farmCfg.farmOutsideAggro = false })
+  after(() => { farmCfg.farmOutsideAggro = farmSaved })
   const crate = (x: number, y = 0) => ({ id: 1001, pos: [x, y, 0] as [number, number, number] })
   const drone = (x: number, y = 0) => ({ id: 101, kind: "npc" as const, pos: [x, y, 0] as [number, number, number], vel: [0, 0, 0] as [number, number, number], aim: [0, 0] as [number, number], hp: 350, max_hp: 350 })
   const fresh = (o: Observation): void => {

@@ -1,6 +1,6 @@
 /** Combat v2 + laser economy: distance gate, kill-confirm focus, regen hold, laser state machine, weaving, farming. */
 import assert from "node:assert/strict"
-import { describe, test } from "node:test"
+import { after, before, describe, test } from "node:test"
 import { aimAt, leadPoint, projectAim } from "../src/combat/aim.ts"
 import { gunFireTolerance, RuleCombat } from "../src/combat/index.ts"
 import { COMBAT, ECONOMY } from "../src/config/index.ts"
@@ -466,6 +466,11 @@ describe("submission 5: per-match state reset", () => {
 
 // ------------------------------------------------------------------ submission 14: heal before farming
 describe("v14: no drone / crate shooting below 85% HP (regen needs 5 s without dealing damage)", () => {
+  // pins the 5ceea9a drone-farming rules (85% HP, 35 m standoff, 40 m engage); farm-45 is in farm_outside_aggro.test.ts
+  const farmCfg = COMBAT as { farmOutsideAggro: boolean }
+  let farmSaved = true
+  before(() => { farmSaved = farmCfg.farmOutsideAggro; farmCfg.farmOutsideAggro = false })
+  after(() => { farmCfg.farmOutsideAggro = farmSaved })
   const drone = (x: number) => ({ id: 101, kind: "npc" as const, pos: [x, 0, 0] as [number, number, number], vel: [0, 0, 0] as [number, number, number], aim: [0, 0] as [number, number], hp: 350, max_hp: 350 })
   const crate = (x: number) => ({ id: 1001, pos: [x, 0, 0] as [number, number, number], hp: 300 })
   const shoot = (hp: number, patch: (o: Observation) => void) =>

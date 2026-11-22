@@ -67,6 +67,16 @@ export const COMBAT = {
   crateFarmMinHpFrac: 0.85,
   npcFarmMinHpFrac: 0.85,
   npcSelfDefenseS: 3,
+  /**
+   * Farm drones from outside their aggro range (experiment "farm-45"): stand off at npc.aggro_range + farmAggroMarginM
+   * (~52 m, was huntNpcStandoffM 35 m, inside the 45 m aggro) and shoot drones out to that + farmEngageExtraM (was
+   * npcEngageRangeM 40 m), so drone farming is allowed down to farmNpcMinHpFrac (was 0.85). Crates unchanged.
+   * Read by Combat and Locomotion. Off = the 5ceea9a behaviour.
+   */
+  farmOutsideAggro: true as boolean,
+  farmNpcMinHpFrac: 0.45,
+  farmAggroMarginM: 7,
+  farmEngageExtraM: 5,
   crateFarmRangeM: 45,
 
   /** Lead solver: fixed-point iterations and the longest flight time we will lead for. */

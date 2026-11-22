@@ -247,13 +247,17 @@ export class RuleCombat implements Combat {
     // v14: below npcFarmMinHpFrac a drone is shot only in self-defence (it damaged us within npcSelfDefenseS: its hits
     // reset the regen timer anyway); otherwise we hold fire so the 5 s regen timer can run out.
     const npcHitUs = world.damage.some((d) => d.by !== null && world.t - d.t <= COMBAT.npcSelfDefenseS && world.tracks.get(d.by)?.kind === "npc")
-    const npcFarmOk = (self.max_hp > 0 ? self.hp / self.max_hp : 1) > COMBAT.npcFarmMinHpFrac || npcHitUs
+    const npcGate = COMBAT.farmOutsideAggro ? COMBAT.farmNpcMinHpFrac : COMBAT.npcFarmMinHpFrac
+    const npcRange = COMBAT.farmOutsideAggro
+      ? cfgNum(world.config.npc as Record<string, unknown>, "aggro_range", 45) + COMBAT.farmAggroMarginM + COMBAT.farmEngageExtraM
+      : COMBAT.npcEngageRangeM
+    const npcFarmOk = (self.max_hp > 0 ? self.hp / self.max_hp : 1) > npcGate || npcHitUs
     if (mechs.length === 0 && npcFarmOk) {
       // No enemy mech in sight at all: a nearby drone is fair game (cubes), but never a distraction from a mech.
       pool = (obs.mechs ?? [])
         .filter((m) => m.kind === "npc")
         .map(view)
-        .filter((c) => c.los && c.dist <= Math.min(engageRange, COMBAT.npcEngageRangeM))
+        .filter((c) => c.los && c.dist <= Math.min(engageRange, npcRange))
     }
     const fullHp = cfgNum(world.config.mech as Record<string, unknown>, "hp", self.max_hp)
     const prio: PriorityContext = { holdsLaser: laser !== null, selfX: self.pos[0], selfY: self.pos[1], frontArcDeg: world.rules.frontArcDeg, fullHp }

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { describe, test } from "node:test"
+import { after, before, describe, test } from "node:test"
 import { aimAt, leadPoint } from "../src/combat/aim.ts"
 import { gunFireTolerance, RuleCombat, needsReload, pickTarget } from "../src/combat/index.ts"
 import { COMBAT } from "../src/config/index.ts"
@@ -149,6 +149,11 @@ describe("target selection and line of sight", () => {
 })
 
 describe("NPC drones are a side dish, never a distraction", () => {
+  // pins the 5ceea9a drone-farming rules (85% HP, 35 m standoff, 40 m engage); farm-45 is in farm_outside_aggro.test.ts
+  const farmCfg = COMBAT as { farmOutsideAggro: boolean }
+  let farmSaved = true
+  before(() => { farmSaved = farmCfg.farmOutsideAggro; farmCfg.farmOutsideAggro = false })
+  after(() => { farmCfg.farmOutsideAggro = farmSaved })
   const npc = (x: number): ActorObs => ({ id: 101, kind: "npc", pos: at(x, -20), vel: [0, 0, 0], aim: [0, 0], hp: 350, max_hp: 350 })
 
   test("shoots a drone within 40 m when no enemy mech is visible", () => {
