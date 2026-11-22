@@ -66,7 +66,7 @@ export const LOCOMOTION = {
   closeM: 42,
   closeLightningM: 52,
   farM: 95,
-  approachMinHpFrac: 0.65,
+  approachMinHpFrac: 0.9,
   /** Any move whose 4 m lookahead leaves the safe rim is bent back inward. */
   rimLookaheadM: 4,
 
@@ -166,7 +166,7 @@ export const LOCOMOTION = {
 
   // ---- idle
   /** Below this HP, safe and unthreatened: stand still (silent) so the out-of-combat regen runs. */
-  regenHoldHpFrac: 0.85,
+  regenHoldHpFrac: 0.95,
   /** Healthy and idle: patrol along a band of the next circle (fraction of its radius). */
   patrolInnerFrac: 0.4,
   patrolOuterFrac: 0.75,
