@@ -25,6 +25,17 @@ export const WORLD = {
   maxDamageRecords: 32,
   soundMemoryS: 5,
   damageMemoryS: 5,
+  /**
+   * Environment detector (experiment "ffa-mode"). Practice is 15 house bots that never fight each other, so before the
+   * zone can kill anyone the only deaths are OUR kills. A free-for-all has other mechs killing each other from the
+   * first minute. external deaths = (match.mechs - obs.alive) - our `kill` events; once this many external deaths are
+   * seen within the first ffaWindowS seconds, the match is treated as a free-for-all for the rest of it (sticky).
+   * The zone cannot kill a full-HP mech that early: phase 1 holds 60 s, then 20 dps.
+   */
+  ffaMinExternalDeaths: 2,
+  ffaWindowS: 150,
+  /** An external-death count must hold this long before it is believed (event / alive ordering). */
+  ffaConfirmS: 0.3,
 } as const
 
 /**
@@ -73,6 +84,8 @@ export const LOCOMOTION = {
   // ---- vanish when wounded (src/locomotion/hide.ts, experiment "vanish")
   /** Master switch (false = the e0f859a behaviour exactly). */
   vanishEnabled: true,
+  /** Only in a detected free-for-all (WorldModel.ffa): in practice kills are placement, in a free-for-all survival is. */
+  vanishOnlyInFfa: true,
   /** Rings searched for a hidden spot, nearest first, and directions per ring. */
   vanishRadiiM: [14, 24, 36, 50] as readonly number[],
   vanishDirections: 16,

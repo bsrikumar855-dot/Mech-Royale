@@ -65,6 +65,14 @@ export class WorldModel {
   sounds: HeardSound[] = []
   damage: DamageRecord[] = []
   private lastTick: number | null = null
+  /** Our confirmed kills this match (`kill` events). */
+  ourKills = 0
+  /** Deaths that were not our kills, counted only within WORLD.ffaWindowS (environment detector). */
+  externalDeathsEarly = 0
+  /** Sticky: other mechs are killing each other, so this is a free-for-all, not the practice squad. */
+  ffa = false
+  private extValue = 0
+  private extSince = 0
   /** Incremented by every reset(): lets modules with their own memory (Locomotion) detect a new match. Read-only for them. */
   resetCount = 0
 
@@ -82,6 +90,11 @@ export class WorldModel {
     this.sounds = []
     this.damage = []
     this.lastTick = null
+    this.ourKills = 0
+    this.externalDeathsEarly = 0
+    this.ffa = false
+    this.extValue = 0
+    this.extSince = 0
   }
 
   get self(): SelfObs {
@@ -130,15 +143,32 @@ export class WorldModel {
     }
 
     for (const e of obs.events ?? []) {
-      if (e.type === "kill") this.tracks.delete(e.target)
-      else if (e.type === "damaged") this.recordDamage(e, t)
+      if (e.type === "kill") {
+        this.tracks.delete(e.target)
+        this.ourKills++
+      } else if (e.type === "damaged") this.recordDamage(e, t)
     }
+    this.updateEnvironment(obs, t)
 
     for (const s of obs.sounds ?? []) this.sounds.push({ kind: s.kind, bearing: s.bearing, dist: s.dist, t: t - s.age })
     this.sounds = this.sounds.filter((s) => t - s.t <= WORLD.soundMemoryS).slice(-WORLD.maxSounds)
     this.damage = this.damage.filter((d) => t - d.t <= WORLD.damageMemoryS).slice(-WORLD.maxDamageRecords)
 
     this.pruneTracks(t)
+  }
+
+  /** Environment detector: deaths before the zone can kill that are not ours mean the others fight each other. */
+  private updateEnvironment(obs: Observation, t: number): void {
+    const total = (this.config.match as Record<string, number | undefined>)["mechs"] ?? 16
+    if (typeof obs.alive !== "number" || !Number.isFinite(obs.alive)) return
+    const external = Math.max(0, total - obs.alive - this.ourKills)
+    // a value must hold for ffaConfirmS: the alive drop and our `kill` event can land in different observations
+    if (external !== this.extValue) {
+      this.extValue = external
+      this.extSince = t
+    }
+    if (t <= WORLD.ffaWindowS && t - this.extSince >= WORLD.ffaConfirmS) this.externalDeathsEarly = Math.max(this.externalDeathsEarly, external)
+    if (this.externalDeathsEarly >= WORLD.ffaMinExternalDeaths) this.ffa = true
   }
 
   private recordDamage(e: DamagedEvent, t: number): void {

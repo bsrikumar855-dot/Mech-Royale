@@ -234,7 +234,7 @@ export class EvasiveLocomotion implements Locomotion {
     }
 
     // ---- vanish when wounded: break every line of sight, then stay silent while the regen runs (src/locomotion/hide.ts)
-    if (L.vanishEnabled && map) {
+    if (L.vanishEnabled && map && (!L.vanishOnlyInFfa || world.ffa)) {
       const watchers = watchersOf(world)
       if (watchers.length > 0) S.vanishSeenT = t
       const finishable =
