@@ -20,7 +20,7 @@ export interface Enemy {
   vx: number
   vy: number
   hp: number
-  policy: "static" | "pursue" | "orbit"
+  policy: "static" | "pursue" | "orbit" | "hunter"
   speed: number
   /** expected gun hit probability per shot while it has a shot line within 200 m (0 = never shoots) */
   hitProb: number
@@ -37,6 +37,26 @@ export interface SimOpts {
   untilT?: number
   /** override the zone phase table (tests) */
   zoneOverride?: any[]
+  /** our starting HP (default: full) */
+  startHp?: number
+  /** called after every decision (audits): state BEFORE the action is applied */
+  onDecision?: (d: Decision) => void
+}
+
+export interface Decision {
+  t: number
+  x: number
+  y: number
+  aim: number
+  act: any
+  mode: string
+  inZone: boolean
+  circle: { c: [number, number]; r: number }
+  /** match time of the last enemy damage we took (-Infinity if none) */
+  lastHitT: number
+  /** the enemy that last damaged us, if any */
+  lastHitBy: { x: number; y: number } | null
+  hp: number
 }
 
 export interface SimResult {
@@ -52,6 +72,8 @@ export interface SimResult {
   finalPos: [number, number]
   trace: Array<{ t: number; x: number; y: number; mode: string; inZone: boolean; hp: number }>
   modes: Record<string, number>
+  /** seconds during which the hunter squad could see us (hunter policy only) */
+  seenS: number
   /** wall-clock ms of every Bot.decide() call (compute only, no IPC) */
   decideMs: number[]
 }
@@ -150,18 +172,26 @@ export async function run(L: Loaded, o: SimOpts): Promise<SimResult> {
   let vx = 0
   let vy = 0
   let aim = 0
-  let hp = mech["hp"]!
+  let hp = o.startHp ?? mech["hp"]!
   let energy = mech["energy"]!
   let lastSpend = -99
   let lastDmg = -99
   const maxT = o.untilT ?? startPh.shrinkEnd + 10
   const enemies = (o.enemies ?? []).map((e) => ({ ...e }))
   const bot = new L.Bot(new L.WorldModel(hello), map)
-  const res: SimResult = { died: false, deathT: null, endT: t, hp, zoneDamage: 0, enemyDamage: 0, timeOutside: 0, minEnemyDist: Infinity, meanDistToFinalCentre: 0, finalPos: [x, y], trace: [], modes: {}, decideMs: [] }
+  const res: SimResult = { died: false, deathT: null, endT: t, hp, zoneDamage: 0, enemyDamage: 0, timeOutside: 0, minEnemyDist: Infinity, meanDistToFinalCentre: 0, finalPos: [x, y], trace: [], modes: {}, decideMs: [], seenS: 0 }
   const dt = 0.05
   let tick = 0
   /** events / sounds produced by enemy fire since the previous observation (the server reports them to us) */
   let pendEvents: any[] = []
+  let lastHitT = Number.NEGATIVE_INFINITY
+  let lastBoost = false
+  // hunter squad (ASSUMPTION: the practice squad shares what any member SEES and hears; protocol vision and sound rules,
+  // 360 deg awareness for every hunter, which makes hiding HARDER than for a real wedge-limited bot)
+  let known: { x: number; y: number } | null = null
+  let squadSees = false
+  const searchWp = new Map<number, { x: number; y: number; t: number }>()
+  let lastHitBy: { x: number; y: number } | null = null
   let pendSounds: any[] = []
   let distSum = 0
   let distN = 0
@@ -172,6 +202,21 @@ export async function run(L: Loaded, o: SimOpts): Promise<SimResult> {
     const P = phaseAt(t)
     const circ = circleAt(P, t)
     const inZone = Math.hypot(x - circ.c[0], y - circ.c[1]) <= circ.r
+    if (enemies.some((e) => e.policy === "hunter")) {
+      if (!known) known = { x, y } // the squad starts on our trail
+      squadSees = false
+      for (const e of enemies) {
+        const d = Math.hypot(e.x - x, e.y - y)
+        const eye: [number, number, number] = [e.x, e.y, map.heightAt(e.x, e.y) + 8]
+        const canopy = { canopy: d > (cfg.vision.near_range as number) }
+        if (d <= (cfg.vision.range as number) && (map.hasVisionLOS(eye, [x, y, z + 4.5], canopy) || map.hasVisionLOS(eye, [x, y, z + 9], canopy))) squadSees = true
+        if ((Math.hypot(vx, vy) > 5 && d <= 40) || (lastBoost && d <= 90)) known = { x, y } // footsteps / boost heard
+      }
+      if (squadSees) {
+        known = { x, y }
+        res.seenS += 0.1
+      }
+    }
     const obs = structuredClone(tmpl)
     obs.tick = tick
     obs.t = +t.toFixed(3)
@@ -215,11 +260,13 @@ export async function run(L: Loaded, o: SimOpts): Promise<SimResult> {
     const act = bot.decide(obs, L.NO_DEADLINE)
     res.decideMs.push(performance.now() - tDecide)
     const mode = (bot.modules.locomotion as any).lastMode ?? "?"
+    o.onDecision?.({ t, x, y, aim, act, mode, inZone, circle: circ, lastHitT, lastHitBy, hp })
     res.modes[mode] = (res.modes[mode] ?? 0) + 1
     if (tick % 10 === 0) res.trace.push({ t, x, y, mode, inZone, hp })
     tick += 2
     const mv = act.move ?? [0, 0]
     const wantBoost = act.boost === true && energy > 1 && Math.hypot(mv[0], mv[1]) > 0.05
+    lastBoost = wantBoost
     const speed = wantBoost ? (mech["boost_speed"] as number) : (mech["walk_speed"] as number)
     for (let k = 0; k < 2; k++) {
       const tx = mv[0] * speed
@@ -255,7 +302,31 @@ export async function run(L: Loaded, o: SimOpts): Promise<SimResult> {
         const dx = x - e.x
         const dy = y - e.y
         const d = Math.hypot(dx, dy) || 1
-        if (e.policy === "pursue") {
+        if (e.policy === "hunter") {
+          let gx = known ? known.x : e.x
+          let gy = known ? known.y : e.y
+          if (squadSees) {
+            // in contact: hold ~90 m (the recorded house bot fought at 55-150 m)
+            const radial = Math.max(-e.speed, Math.min(e.speed, d - 90))
+            e.vx = (dx / d) * radial + (-dy / d) * e.speed * 0.5
+            e.vy = (dy / d) * radial + (dx / d) * e.speed * 0.5
+          } else {
+            const kd = known ? Math.hypot(gx - e.x, gy - e.y) : 0
+            if (known && kd < 10) {
+              let wp = searchWp.get(e.id)
+              if (!wp || t - wp.t > 5 || Math.hypot(wp.x - e.x, wp.y - e.y) < 5) {
+                wp = { x: known.x + (rand() - 0.5) * 120, y: known.y + (rand() - 0.5) * 120, t }
+                searchWp.set(e.id, wp)
+              }
+              gx = wp.x
+              gy = wp.y
+            }
+            const gd = Math.hypot(gx - e.x, gy - e.y) || 1
+            const want = gd > 2 ? e.speed : 0
+            e.vx = ((gx - e.x) / gd) * want
+            e.vy = ((gy - e.y) / gd) * want
+          }
+        } else if (e.policy === "pursue") {
           const sp = d > 60 ? e.speed : 0
           e.vx = (dx / d) * sp
           e.vy = (dy / d) * sp
@@ -271,12 +342,14 @@ export async function run(L: Loaded, o: SimOpts): Promise<SimResult> {
         e.x += emx
         e.y += emy
         res.minEnemyDist = Math.min(res.minEnemyDist, d)
-        if (e.hitProb > 0 && d <= 200 && map.hasShotLOS([e.x, e.y, map.heightAt(e.x, e.y) + 7], [x, y, z + 4.5])) {
+        if (e.hitProb > 0 && d <= 200 && (e.policy !== "hunter" || squadSees) && map.hasShotLOS([e.x, e.y, map.heightAt(e.x, e.y) + 7], [x, y, z + 4.5])) {
           const dmg = (45 / 0.24) * e.hitProb * dt
           hp -= dmg
           res.enemyDamage += dmg
           lastDmg = t
           const bearing = Math.atan2(e.y - y, e.x - x)
+          lastHitT = t
+          lastHitBy = { x: e.x, y: e.y }
           const ev = pendEvents.find((q) => q.by === e.id)
           if (ev) ev.amount += dmg
           else pendEvents.push({ type: "damaged", amount: dmg, weapon: "gun", bearing, by: e.id })

@@ -70,6 +70,28 @@ export const LOCOMOTION = {
   /** Any move whose 4 m lookahead leaves the safe rim is bent back inward. */
   rimLookaheadM: 4,
 
+  // ---- vanish when wounded (src/locomotion/hide.ts, experiment "vanish")
+  /** Master switch (false = the e0f859a behaviour exactly). */
+  vanishEnabled: true,
+  /** Rings searched for a hidden spot, nearest first, and directions per ring. */
+  vanishRadiiM: [14, 24, 36, 50] as readonly number[],
+  vanishDirections: 16,
+  /** At most this many known enemies are checked for line of sight (nearest first). */
+  vanishMaxWatchers: 3,
+  /** At most this many straight-line walkability checks per spot search (each ~0.3 ms at 50 m). */
+  vanishMaxSegmentChecks: 6,
+  /** The hidden spot is re-chosen this often (vision checks are the cost). */
+  vanishReplanS: 0.5,
+  /** Leave vanish once healed to this fraction (or when a fight becomes finishable). */
+  vanishExitHpFrac: 0.8,
+  /** While unseen, walk at this fraction of walk speed: below sound.step_speed (5 m/s of 11.7) = no footsteps. */
+  vanishSilentFrac: 0.38,
+  /** Within this distance of the spot we stop (silent). */
+  vanishArriveM: 2,
+  /** Never vanish from a fight we can finish: a shooter at or below this HP while we still have this HP fraction. */
+  vanishFinishHp: 350,
+  vanishFinishMinHpFrac: 0.25,
+
   // ---- hops
   jumpMinS: 1.8,
   jumpMaxS: 2.4,

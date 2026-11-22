@@ -37,6 +37,13 @@ export class LocoState {
   isBoosting = false
   patrolSign: 1 | -1 = 1
 
+  /** vanish: active, chosen hidden spot, when it was chosen, last time an enemy was tracked */
+  vanishing = false
+  vanishSpot: [number, number] | null = null
+  vanishSpotT = Number.NEGATIVE_INFINITY
+  vanishSeenT = Number.NEGATIVE_INFINITY
+  vanishLastSeen: [number, number] | null = null
+
   reset(): void {
     this.lastTick = null
     this.lastPos = null
@@ -50,6 +57,11 @@ export class LocoState {
     this.wallCommitUntilT = Number.NEGATIVE_INFINITY
     this.isBoosting = false
     this.patrolSign = 1
+    this.vanishing = false
+    this.vanishSpot = null
+    this.vanishSpotT = Number.NEGATIVE_INFINITY
+    this.vanishSeenT = Number.NEGATIVE_INFINITY
+    this.vanishLastSeen = null
   }
 
   sync(world: WorldModel): void {

@@ -1,5 +1,6 @@
 /** Locomotion v3: anti-lead A-D strafing, projectile / mortar / laser dodges, hops, zone, loot, patrol, wall feeler. */
 import assert from "node:assert/strict"
+import { seenBy, watchersOf } from "../src/locomotion/hide.ts"
 import { describe, test } from "node:test"
 import { LOCOMOTION as L } from "../src/config/index.ts"
 import { EvasiveLocomotion } from "../src/locomotion/index.ts"
@@ -72,7 +73,9 @@ describe("threat trigger: never a stationary target under threat (the 300/300 bu
       const out = r.loco.decide({ world: r.world, map: r.map, deadline: NO_DEADLINE }, [])
       if (raw.mechs.some((m) => m.kind === "mech")) {
         checked++
-        assert.ok(mag(out.move) > 0.3, `tick ${raw.tick}: stationary with an enemy in sight`)
+        // vanish (experiment "vanish"): standing still is allowed ONLY while no tracked enemy can see us (hidden + silent)
+        const hidden = r.loco.lastMode === "vanish" && r.map !== null && !seenBy(r.map, watchersOf(r.world), raw.self.pos[0], raw.self.pos[1], raw.self.pos[2], 9, 45)
+        assert.ok(mag(out.move) > 0.3 || hidden, `tick ${raw.tick}: stationary with an enemy in sight`)
       }
     }
     assert.ok(checked > 0)

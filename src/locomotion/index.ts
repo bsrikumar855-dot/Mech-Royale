@@ -18,11 +18,12 @@ import type { Vec2, Vec3 } from "../types/mechfight.ts"
 import { clamp, dist2d, unit2 } from "../world/geom.ts"
 import type { WorldModel } from "../world/world.ts"
 import { navGridFor, Navigator } from "../nav/index.ts"
+import { findHideSpot, seenBy, watchersOf } from "./hide.ts"
 import { sense, type Sensed } from "./sense.ts"
 import { LocoState } from "./state.ts"
 import { blockedAhead, steer } from "./steer.ts"
 
-export type Mode = "hunt" | "mortar" | "outside" | "laserDodge" | "shrink" | "retreat" | "backpedal" | "approach" | "strafe" | "loot" | "rim" | "hold" | "patrol" | "idle"
+export type Mode = "vanish" | "hunt" | "mortar" | "outside" | "laserDodge" | "shrink" | "retreat" | "backpedal" | "approach" | "strafe" | "loot" | "rim" | "hold" | "patrol" | "idle"
 
 const add = (a: Vec2, b: Vec2, k: number): Vec2 => [a[0] + b[0] * k, a[1] + b[1] * k]
 const norm = (v: Vec2): Vec2 | null => unit2(v[0], v[1])
@@ -232,8 +233,57 @@ export class EvasiveLocomotion implements Locomotion {
       }
     }
 
+    // ---- vanish when wounded: break every line of sight, then stay silent while the regen runs (src/locomotion/hide.ts)
+    if (L.vanishEnabled && map) {
+      const watchers = watchersOf(world)
+      if (watchers.length > 0) S.vanishSeenT = t
+      const finishable =
+        hpFrac >= L.vanishFinishMinHpFrac && sn.enemies.some((e) => e.los && (world.tracks.get(e.id)?.hp ?? Infinity) <= L.vanishFinishHp)
+      if (!S.vanishing && hpFrac < L.woundedHpFrac && watchers.length > 0 && !finishable) {
+        S.vanishing = true
+        S.vanishSpot = null
+        S.vanishSpotT = Number.NEGATIVE_INFINITY
+      }
+      if (S.vanishing && (hpFrac >= L.vanishExitHpFrac || finishable)) {
+        S.vanishing = false
+        S.vanishSpot = null
+        S.vanishLastSeen = null
+      }
+      const overridable: readonly Mode[] = ["retreat", "strafe", "backpedal", "approach", "hold", "patrol", "idle", "loot", "hunt"]
+      if (S.vanishing && overridable.includes(mode)) {
+        const height = world.selfStat("height", world.rules.height)
+        const near = world.config.vision.near_range
+        const seen = watchers.length > 0 && seenBy(map, watchers, px, py, self.pos[2], height, near)
+        if (seen || !S.vanishLastSeen) S.vanishLastSeen = [px, py]
+        // reached the spot: choose the next one now (seen: we must not stand in sight; unseen: keep drifting away)
+        if (S.vanishSpot && dist2d(px, py, S.vanishSpot[0], S.vanishSpot[1]) <= L.vanishArriveM) S.vanishSpotT = Number.NEGATIVE_INFINITY
+        if (t - S.vanishSpotT >= L.vanishReplanS) {
+          S.vanishSpotT = t
+          // seen: the nearest spot out of every line of sight; unseen: the hidden spot farthest from where we were last
+          // seen (the hunters search there), walked silently
+          const spot = findHideSpot(world, map, nav ? nav.grid : null, watchers, inSafe, seen ? null : S.vanishLastSeen)
+          S.vanishSpot = spot ? [spot.x, spot.y] : !seen ? [px, py] : null
+        }
+        if (S.vanishSpot) {
+          mode = "vanish"
+          const [sx, sy] = S.vanishSpot
+          if (dist2d(px, py, sx, sy) <= L.vanishArriveM) {
+            if (!seen) {
+              dir = null // hidden: silent and still while the regen runs
+              boost = false
+            } else mode = "retreat" // no hidden spot near: keep the old evasive retreat heading
+          } else {
+            const tw = toward(sx, sy)
+            // seen: get out of sight fast; unseen: silent walk (below step_speed: no footsteps)
+            dir = tw && !seen ? [tw[0] * L.vanishSilentFrac, tw[1] * L.vanishSilentFrac] : tw
+            boost = seen && !ourLaserCharging && energy > L.tacticalBoostHoldEnergy
+          }
+        }
+      }
+    }
+
     // keep evasive / loot / patrol moves inside the safe rim (the zone modes already point inward)
-    const rimChecked: readonly Mode[] = ["hunt", "retreat", "backpedal", "approach", "strafe", "loot", "patrol", "laserDodge"]
+    const rimChecked: readonly Mode[] = ["vanish", "hunt", "retreat", "backpedal", "approach", "strafe", "loot", "patrol", "laserDodge"]
     if (dir && rimChecked.includes(mode)) {
       const m = Math.hypot(dir[0], dir[1])
       if (!inSafe(px + (dir[0] / m) * L.rimLookaheadM, py + (dir[1] / m) * L.rimLookaheadM)) {
