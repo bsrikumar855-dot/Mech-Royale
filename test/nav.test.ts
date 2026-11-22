@@ -183,3 +183,61 @@ describe("Locomotion zone modes use the planned path", () => {
     assert.ok(out.move[1] > 0.5, "straight toward the zone to the north")
   })
 })
+
+/**
+ * A tight 3-wall alcove (north, east, west; open south) with wall faces 3.6 m from the centre: close enough that
+ * EVERY one of the feeler's 9 candidate headings (0, +-30, +-60, +-90, +-120 deg off north) is blocked within the
+ * 4 m probe (verified directly against blockedAhead for face distances 3.5-4.0 m), yet far enough that the centre
+ * itself clears the 3.5 m body-radius-plus-clearance walkability requirement -- the narrow geometric window where
+ * steer() genuinely returns null (boxed in) while still being a position the mech could legitimately occupy.
+ */
+function alcoveMap(face = 3.6): MapQuery {
+  const n = 101
+  const heights = new Int16Array(n * n)
+  const rect = (x0: number, y0: number, x1: number, y1: number): number[] => [x0, y0, x1, y0, x1, y1, x0, y1]
+  const world: WorldJson = {
+    bounds: { minX: -50, maxX: 50, minY: -50, maxY: 50 },
+    terrain: { minX: -50, minY: -50, step: 1, nx: n, ny: n, scale: 0.01 },
+    rules: { maxStep: 1.5, maxSlopeDeg: 50, canopyDensity: 0.35, canopyBlockT: 0.25 },
+    prisms: [
+      { kind: "building", base: -5, top: 30, ring: rect(-10, face, 10, 15) },
+      { kind: "building", base: -5, top: 30, ring: rect(-10, -10, -face, 15) },
+      { kind: "building", base: -5, top: 30, ring: rect(face, -10, 10, 15) },
+    ],
+    trees: { fields: ["x", "y", "z", "height", "crownR", "crownBase", "trunkR", "osm", "crownX", "crownY"], data: [] },
+  }
+  return new MapQuery(world, heights)
+}
+
+describe("Locomotion unstick: steer() being boxed in falls back to the planned path in ANY mode, not just zone runs", () => {
+  const hello = fixtureHello()
+  /** Healthy, safe, no threats, dead centre of the alcove, heading north into its wall for a cube loot target
+   * beyond it: not a zone mode at all. */
+  const obsAt = (t: number, tick: number) =>
+    cleanObs((o) => {
+      o.t = t
+      o.tick = tick
+      o.self.pos = [0, 0, 0]
+      o.self.in_zone = true
+      o.zone = { center: [1000, 1000], radius: 2000, next_center: [1000, 1000], next_radius: 2000, shrink_start: 1e6, shrink_end: 1e6 + 1, dps: 100 }
+      o.cubes = [{ id: 5001, pos: [0, 40, 0] }]
+    }, hello)
+
+  test("CONTROL: without a map there is no feeler and no fallback -- it just walks straight into the wall", () => {
+    const loco = new EvasiveLocomotion()
+    const world = new WorldModel(hello)
+    const out = loco.decide(ctxFor(obsAt(10, 200), null, world), [])
+    assert.equal(loco.lastMode, "loot")
+    assert.ok(out.move[1] > 0.5, "no map means no collision checking at all: straight north, unrelated to this fix")
+  })
+
+  test("loot mode, boxed in by the alcove (steer() returns null): escapes south instead of standing still forever", () => {
+    const map = alcoveMap()
+    const loco = new EvasiveLocomotion()
+    const world = new WorldModel(hello)
+    let move: [number, number] = [0, 0]
+    for (let k = 0; k < 60; k++) move = loco.decide(ctxFor(obsAt(10 + k * 0.1, 200 + k * 2), map, world), []).move
+    assert.equal(loco.lastMode, "loot")
+    assert.ok(move[1] < -0.2, `expected a southbound exit heading once the field settles, got ${move}`)
+  })
+})
