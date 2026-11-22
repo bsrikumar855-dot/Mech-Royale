@@ -242,7 +242,7 @@ export const LOCOMOTION = {
    * COMBAT.lateFinishWindowS); no loot / farm / arming detours except uncontested supply drops (no tracked enemy within
    * lateDropClearM); the shrink trigger keeps lateNextMarginM more margin inside the next circle.
    */
-  lateCautionT: 240,
+  lateCautionT: 180, // B2: B1 with T = 180 s
   lateNextMarginM: 15,
   lateDropClearM: 60,
 } as const
