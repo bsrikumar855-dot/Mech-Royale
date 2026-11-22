@@ -71,7 +71,7 @@ export const LOCOMOTION = {
   rimLookaheadM: 4,
 
   /** Noise calibration: reorders strafe / hop timing (same distributions). 0 = exact 219f397 timing. */
-  timingSalt: 0,
+  timingSalt: 1,
 
   // ---- predictive bullet evasion (src/locomotion/evade.ts, experiment "evade")
   /** Master switch (false = the 219f397 behaviour exactly). */
