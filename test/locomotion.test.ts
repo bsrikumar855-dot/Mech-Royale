@@ -677,3 +677,44 @@ describe("B3: opening stealth", () => {
     assert.equal(new RuleCombat().decide({ world: near, map: null, deadline: NO_DEADLINE }).hasTarget, true)
   })
 })
+
+describe("late-game caution (1d)", () => {
+  test("from lateCautionT a 1v1 at 70 m retreats instead of strafing; a nearly dead target is still fought", () => {
+    const late = new Runner()
+    late.t = L.lateCautionT + 1
+    assert.equal(late.step((o) => (o.mechs = [enemy(5, [70, 0, 0])])).mode, "retreat")
+    const fin = new Runner()
+    fin.t = L.lateCautionT + 1
+    assert.equal(fin.step((o) => (o.mechs = [enemy(5, [70, 0, 0], { hp: 200 })])).mode, "strafe")
+    assert.equal(once((o) => (o.mechs = [enemy(5, [70, 0, 0])])).mode, "strafe")
+  })
+})
+
+describe("B1 late-game caution extras", () => {
+  test("late: no cube detour; an uncontested supply drop is still taken", () => {
+    const late = new Runner()
+    late.t = L.lateCautionT + 1
+    assert.notEqual(late.step((o) => (o.cubes = [{ id: 5001, pos: [20, 0, 0] }])).mode, "loot")
+    const drop = new Runner()
+    drop.t = L.lateCautionT + 1
+    assert.equal(drop.step((o) => (o.drops = [{ id: 20000, pos: [40, 0, 0], radius: 8, lands_in: 0, capture_s: 4, progress: 0, holder: null }])).mode, "loot")
+    assert.equal(once((o) => (o.cubes = [{ id: 5001, pos: [20, 0, 0] }])).mode, "loot", "early: loot as before")
+  })
+  test("late: Combat holds fire on a healthy mech that has not damaged us in 3 s, fires at a recent attacker", async () => {
+    const { RuleCombat } = await import("../src/combat/index.ts")
+    const { COMBAT } = await import("../src/config/index.ts")
+    const fire = (attacked: boolean) => {
+      const w = new WorldModel(hello)
+      w.update(cleanObs((o) => {
+        o.t = L.lateCautionT + 5
+        o.tick = Math.round(o.t * 20)
+        o.mechs = [enemy(5, [60, 0, 0])]
+        if (attacked) o.events = [{ type: "damaged", amount: 45, weapon: "gun", bearing: 0, by: 5 }]
+      }))
+      return new RuleCombat().decide({ world: w, map: null, deadline: NO_DEADLINE }).hasTarget
+    }
+    assert.equal(fire(false), false)
+    assert.equal(fire(true), true)
+    assert.ok(COMBAT.lateAttackerMemoryS === 3)
+  })
+})

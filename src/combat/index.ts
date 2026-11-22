@@ -111,6 +111,17 @@ export function pickTarget(pool: readonly Cand[], p?: PriorityContext): Cand | n
   return best
 }
 
+/** B1: damage our gun (+ lightning) can deal in `windowS` seconds at full uptime (finishable threshold). */
+export function burstDamage(self: SelfObs, windowS: number): number {
+  let dps = 0
+  for (const w of self.weapons) {
+    if (!w || (w.kind !== "gun" && w.kind !== "lightning")) continue
+    const cd = stat(w, "cooldown")
+    if (cd > 0) dps += stat(w, "damage") / cd
+  }
+  return dps * windowS
+}
+
 /** The gun can fire: rounds in the magazine and not mid-reload. */
 export const gunReady = (gun: WeaponObs): boolean => (gun.ammo ?? 0) > 0 && (gun.reload ?? 0) === 0
 
@@ -260,6 +271,11 @@ export class RuleCombat implements Combat {
     }
     if (world.damage.some((d) => d.weapon !== "zone")) this.damagedOnce = true
     if (world.t < LOCOMOTION.stealthS && !this.damagedOnce) pool = pool.filter((c) => c.kind !== "mech" || c.dist <= COMBAT.stealthHoldFireBeyondM)
+    if (COMBAT.lateFireDiscipline && world.t >= LOCOMOTION.lateCautionT) {
+      pool = pool.filter(
+        (c) => c.kind !== "mech" || (c.hp !== undefined && c.hp <= burstDamage(self, COMBAT.lateFinishWindowS)) || world.damage.some((d) => d.by === c.id && world.t - d.t <= COMBAT.lateAttackerMemoryS),
+      )
+    }
     const fullHp = cfgNum(world.config.mech as Record<string, unknown>, "hp", self.max_hp)
     const prio: PriorityContext = { holdsLaser: laser !== null, selfX: self.pos[0], selfY: self.pos[1], frontArcDeg: world.rules.frontArcDeg, fullHp }
     const target = pickTarget(pool, prio)

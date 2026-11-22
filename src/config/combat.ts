@@ -40,6 +40,11 @@ export const COMBAT = {
   rearArcBonus: 0.1,
   /** B3: during the opening stealth (LOCOMOTION.stealthS, not yet damaged) hold fire on mechs beyond this */
   stealthHoldFireBeyondM: 60,
+  /** B1: from LOCOMOTION.lateCautionT fire only at mechs that damaged us within lateAttackerMemoryS, or finishable ones */
+  lateFireDiscipline: true as boolean,
+  lateAttackerMemoryS: 3,
+  /** finishable = HP <= the damage our gun (and lightning) deals in this window */
+  lateFinishWindowS: 2,
 
   // ---- regen hold-fire discipline (dealing damage resets the 5 s out-of-combat regen timer). Strict: never in a 1v1 brawl.
   regenHoldHpFrac: 0.35,
