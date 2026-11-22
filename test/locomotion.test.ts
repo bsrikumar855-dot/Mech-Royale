@@ -647,3 +647,24 @@ describe("P9: arm early and the stuck escape both yield to the predictive dodge 
     assert.equal(x.out.jump, false, "the escape's jump is not applied during the dodge")
   })
 })
+
+describe("P11: arming under fire still yields to the dodge planner", () => {
+  test("weaving to a close laser with one shooter: arm; a dodgeable bullet led onto that path -> dodge", () => {
+    const base = (o: Observation) => { o.mechs = [enemy(5, [70, 0, 0])]; o.pickups = [{ id: 8001, kind: "laser", pos: [-40, 0, 0] }] }
+    const arm = once(base)
+    assert.equal(arm.mode, "arm")
+    const walk = (hello.config.mech as Record<string, number>).walk_speed!
+    const [mx, my] = arm.out.move as [number, number]
+    // already moving along the arming path; a bullet from 150 m (0.6 s out) led to where that path puts us
+    const T = 150 / 252
+    const aim: [number, number] = [mx * walk * T, my * walk * T]
+    const l = Math.hypot(aim[0] - 150, aim[1])
+    const x = once((o) => {
+      base(o)
+      o.self.vel = [mx * walk, my * walk, 0]
+      o.projectiles = [{ id: 1, kind: "gun", pos: [150, 0, 4.5], vel: [((aim[0] - 150) / l) * 252, (aim[1] / l) * 252, 0] }]
+    })
+    assert.equal(x.mode, "dodge", `mode ${x.mode} move ${x.out.move}`)
+  })
+
+})
