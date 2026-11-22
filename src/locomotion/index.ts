@@ -18,12 +18,12 @@ import type { Vec2, Vec3 } from "../types/mechfight.ts"
 import { angleDiff, clamp, dist2d, unit2, yawTo } from "../world/geom.ts"
 import type { WorldModel } from "../world/world.ts"
 import { navGridFor, Navigator } from "../nav/index.ts"
-import { sense, type Sensed } from "./sense.ts"
+import { sense, type Sensed, type SensedEnemy } from "./sense.ts"
 import { LocoState } from "./state.ts"
 import { blockedAhead, steer } from "./steer.ts"
 import { planEvasion, threateningBullets } from "./evade.ts"
 
-export type Mode = "arm" | "dodge" | "hunt" | "mortar" | "outside" | "laserDodge" | "shrink" | "retreat" | "backpedal" | "approach" | "strafe" | "loot" | "rim" | "hold" | "patrol" | "idle"
+export type Mode = "arm" | "lightningKite" | "dodge" | "hunt" | "mortar" | "outside" | "laserDodge" | "shrink" | "retreat" | "backpedal" | "approach" | "strafe" | "loot" | "rim" | "hold" | "patrol" | "idle"
 
 const add = (a: Vec2, b: Vec2, k: number): Vec2 => [a[0] + b[0] * k, a[1] + b[1] * k]
 const norm = (v: Vec2): Vec2 | null => unit2(v[0], v[1])
@@ -58,6 +58,8 @@ export class EvasiveLocomotion implements Locomotion {
   private lastLootPick: { x: number; y: number } | null = null
   /** P6: torso yaw to look along this decision (opening sweep / arming walk), if any */
   private scanYaw: number | undefined = undefined
+  /** Lightning carriers' no-go discs for this decision's loot picks (1a). */
+  private lootAvoid: { x: number; y: number; r: number }[] = []
 
   reset(): void {
     this.state.reset()
@@ -195,6 +197,14 @@ export class EvasiveLocomotion implements Locomotion {
     }
     const perp = side()
 
+    // ---- anti-lightning field (1a)
+    const kiteR = sn.lightningR
+    const kiteFrom = L.lightningKite
+      ? sn.lightningCarriers.filter((e) => e.dist < kiteR + L.lightningKiteExtraM && !(e.hpFrac <= L.lightningFinishHpFrac && e.dist > kiteR))
+      : []
+    this.lootAvoid = L.lightningKite ? sn.lightningCarriers.map((e) => ({ x: e.x, y: e.y, r: kiteR + L.lightningLootAvoidExtraM })) : []
+    const closeLightning = L.lightningKite ? kiteR + L.lightningBackpedalExtraM : L.closeLightningM
+
     // ---- pick a heading
     let dir: Vec2 | null = null
     let boost = false
@@ -214,6 +224,10 @@ export class EvasiveLocomotion implements Locomotion {
       const inward = zoneDir() ?? toward(cur.center[0], cur.center[1])
       dir = inward && perp && underFire ? norm(add(inward, perp, L.outsideWeave)) : inward
       boost = energy > L.outsideBoostMinEnergy
+    } else if (kiteFrom.length > 0) {
+      mode = "lightningKite"
+      dir = this.kiteHeading(world, map, sn, kiteFrom, inSafe)
+      boost = !ourLaserCharging && energy > L.lightningKiteBoostMinEnergy
     } else if (sn.chargers.length > 0 && perp) {
       mode = "laserDodge"
       dir = perp
@@ -224,7 +238,7 @@ export class EvasiveLocomotion implements Locomotion {
       dir = inward && perp && underFire ? norm(add(inward, perp, L.shrinkWeave)) : inward
     } else if (underFire && perp && b !== null) {
       const towardThreat: Vec2 = [Math.cos(b), Math.sin(b)]
-      const close = sn.enemies.some((e) => e.dist < (e.lightning ? L.closeLightningM : L.closeM))
+      const close = sn.enemies.some((e) => e.dist < (e.lightning ? closeLightning : L.closeM))
       const close18 = hpFrac > L.closeLootMinHpFrac && sn.losCount <= 1 ? this.pickLoot(world, inSafe, L.closeLootM) : null
       // v5 post-kill scoop: no shot line on us -> cubes up to 25 m; one shooter -> a cube within 14 m above 45% HP
       const scoopR = sn.losCount === 0 ? L.scoopNoLosM : sn.losCount === 1 && hpFrac > L.scoopOneLosMinHpFrac ? L.scoopOneLosM : 0
@@ -310,7 +324,7 @@ export class EvasiveLocomotion implements Locomotion {
     }
 
     // keep evasive / loot / patrol moves inside the safe rim (the zone modes already point inward)
-    const rimChecked: readonly Mode[] = ["hunt", "retreat", "backpedal", "approach", "strafe", "loot", "patrol", "laserDodge"]
+    const rimChecked: readonly Mode[] = ["lightningKite", "hunt", "retreat", "backpedal", "approach", "strafe", "loot", "patrol", "laserDodge"]
     if (dir && rimChecked.includes(mode)) {
       const m = Math.hypot(dir[0], dir[1])
       if (!inSafe(px + (dir[0] / m) * L.rimLookaheadM, py + (dir[1] / m) * L.rimLookaheadM)) {
@@ -385,6 +399,7 @@ export class EvasiveLocomotion implements Locomotion {
       const d = dist2d(px, py, x, y)
       if (d > Math.min(range, maxDist) || !inSafe(x, y)) return
       for (const b of this.state.lootBans) if (dist2d(x, y, b.x, b.y) < L.stuckLootBanM) return
+      for (const a of this.lootAvoid) if (dist2d(x, y, a.x, a.y) < a.r) return
       const value = (L.lootBase[kind] ?? L.huntBase[kind] ?? 0) / (1 + d / L.lootHalfValueM)
       if (best && value <= best.value) return
       const pick: LootPick = { x, y, kind, dist: d, value }
@@ -470,6 +485,46 @@ export class EvasiveLocomotion implements Locomotion {
       if (v > bestV) {
         bestV = v
         best = { x: m.x, y: m.y, kind: m.kind, dist: d }
+      }
+    }
+    return best
+  }
+
+  /**
+   * 1a: run from lightning carriers. Scores a fan of headings around "away" by metres gained from the nearest carrier,
+   * zone safety, walls and how many other (non-carrier) enemies would have a shot line at the probe point.
+   */
+  private kiteHeading(world: WorldModel, map: TickContext["map"], sn: Sensed, carriers: readonly SensedEnemy[], inSafe: (x: number, y: number) => boolean): Vec2 | null {
+    const [px, py, pz] = world.self.pos
+    let ax = 0
+    let ay = 0
+    for (const c of carriers) {
+      const d = Math.max(1, c.dist)
+      ax += (px - c.x) / (d * d)
+      ay += (py - c.y) / (d * d)
+    }
+    const base = Math.hypot(ax, ay) > 1e-12 ? Math.atan2(ay, ax) : 0
+    const minDist = (x: number, y: number): number => carriers.reduce((m, c) => Math.min(m, dist2d(x, y, c.x, c.y)), Infinity)
+    const d0 = minDist(px, py)
+    const others = sn.enemies.filter((e) => e.listed && !e.lightning).slice(0, L.maxLosChecks)
+    const comH = world.selfStat("height", world.rules.height) / 2
+    let best: Vec2 | null = null
+    let bestScore = -Infinity
+    for (const off of L.lightningKiteOffsetsDeg) {
+      const yaw = base + (off * Math.PI) / 180
+      const u: Vec2 = [Math.cos(yaw), Math.sin(yaw)]
+      const qx = px + u[0] * L.lightningKiteProbeM
+      const qy = py + u[1] * L.lightningKiteProbeM
+      let score = minDist(qx, qy) - d0
+      if (!inSafe(qx, qy)) score -= L.lightningKiteUnsafePenalty
+      if (map) {
+        if (blockedAhead(map, world, u)) score -= L.lightningKiteBlockedPenalty
+        const qz = Number.isFinite(map.heightAt(qx, qy)) ? map.heightAt(qx, qy) + comH : pz + comH
+        for (const o of others) if (map.hasShotLOS(o.muzzle, [qx, qy, qz])) score -= L.lightningKiteLosPenalty
+      }
+      if (score > bestScore) {
+        bestScore = score
+        best = u
       }
     }
     return best
