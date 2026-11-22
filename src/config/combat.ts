@@ -38,6 +38,8 @@ export const COMBAT = {
   chargingThreatBonus: 0.4,
   /** We would hit its rear arc (x rear_mult). */
   rearArcBonus: 0.1,
+  /** B3: during the opening stealth (LOCOMOTION.stealthS, not yet damaged) hold fire on mechs beyond this */
+  stealthHoldFireBeyondM: 60,
 
   // ---- regen hold-fire discipline (dealing damage resets the 5 s out-of-combat regen timer). Strict: never in a 1v1 brawl.
   regenHoldHpFrac: 0.35,

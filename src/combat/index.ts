@@ -25,7 +25,7 @@
  *    no tracked enemy within proactiveReloadClearM (anti-blink: a 2.4 s reload is uninterruptible).
  *  - No target: hasTarget=false + threatBearing so the Arbiter faces the threat (rear hits deal x rear_mult).
  */
-import { COMBAT } from "../config/index.ts"
+import { COMBAT, LOCOMOTION } from "../config/index.ts"
 import type { Combat, CombatOutput, TickContext } from "../types/contracts.ts"
 import type { ActorObs, SelfObs, Vec2, Vec3, WeaponKind, WeaponObs } from "../types/mechfight.ts"
 import { aimErrorRad, angleDiff, clamp, yawTo } from "../world/geom.ts"
@@ -195,6 +195,8 @@ export class RuleCombat implements Combat {
   private lastEnemyLosT = Number.NEGATIVE_INFINITY
   /** The last mech target that had a shot line, and when (short-flicker aim lock). */
   private lastLosTarget: { id: number; t: number } | null = null
+  /** B3: we took non-zone damage at some point this match */
+  private damagedOnce = false
   private epoch = -1
   private lastTick: number | null = null
 
@@ -203,6 +205,7 @@ export class RuleCombat implements Combat {
       this.laserSeenT = Number.NEGATIVE_INFINITY
       this.lastEnemyLosT = Number.NEGATIVE_INFINITY
       this.lastLosTarget = null
+      this.damagedOnce = false
       this.epoch = world.resetCount
     }
     this.lastTick = world.tick
@@ -255,6 +258,8 @@ export class RuleCombat implements Combat {
         .map(view)
         .filter((c) => c.los && c.dist <= Math.min(engageRange, COMBAT.npcEngageRangeM))
     }
+    if (world.damage.some((d) => d.weapon !== "zone")) this.damagedOnce = true
+    if (world.t < LOCOMOTION.stealthS && !this.damagedOnce) pool = pool.filter((c) => c.kind !== "mech" || c.dist <= COMBAT.stealthHoldFireBeyondM)
     const fullHp = cfgNum(world.config.mech as Record<string, unknown>, "hp", self.max_hp)
     const prio: PriorityContext = { holdsLaser: laser !== null, selfX: self.pos[0], selfY: self.pos[1], frontArcDeg: world.rules.frontArcDeg, fullHp }
     const target = pickTarget(pool, prio)

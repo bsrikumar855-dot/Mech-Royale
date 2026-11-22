@@ -230,7 +230,7 @@ describe("Locomotion unstick: steer() being boxed in falls back to the planned p
   test("CONTROL: without a map there is no feeler and no fallback -- it just walks straight into the wall", () => {
     const loco = new EvasiveLocomotion()
     const world = new WorldModel(hello)
-    const out = loco.decide(ctxFor(obsAt(10, 200), null, world), [])
+    const out = loco.decide(ctxFor(obsAt(30, 600), null, world), [])
     assert.equal(loco.lastMode, "loot")
     assert.ok(out.move[1] > 0.5, "no map means no collision checking at all: straight north, unrelated to this fix")
   })

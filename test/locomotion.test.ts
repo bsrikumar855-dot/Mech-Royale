@@ -29,7 +29,7 @@ class Runner {
   loco = new EvasiveLocomotion()
   world = new WorldModel(hello)
   map: MapQuery | null
-  t = 10
+  t = 30
   /** last commanded move: fed back as our velocity, like a server that lets us walk (the stuck detector reads it) */
   lastMove: readonly number[] = [0, 0]
   constructor(map: MapQuery | null = null) {
@@ -643,5 +643,37 @@ describe("P9: arm early and the stuck escape both yield to the predictive dodge 
     const x = r.step((o) => { o.self.vel = [0, 0, 0]; bullet(o) })
     assert.equal(x.mode, "dodge")
     assert.equal(x.out.jump, false, "the escape's jump is not applied during the dodge")
+  })
+})
+
+describe("B3: opening stealth", () => {
+  const walk = (hello.config.mech as Record<string, number>).walk_speed!
+  const step = hello.config.sound.step_speed
+  test("t < stealthS, never damaged: silent speed, no boost; after stealthS or once damaged: full speed", () => {
+    const r = new Runner()
+    r.t = 5
+    const x = r.step()
+    assert.ok(mag(x.out.move) * walk <= L.stealthStepFrac * step + 1e-9, `move ${x.out.move}`)
+    assert.ok(mag(x.out.move) > 0)
+    assert.equal(x.out.boost, false)
+    assert.ok(mag(once().out.move) > 0.99, "t = 30: full speed")
+    const hit = new Runner()
+    hit.t = 5
+    hit.step((o) => (o.events = [{ type: "damaged", amount: 45, weapon: "gun", bearing: 0, by: 9 }]))
+    assert.ok(mag(hit.step().out.move) > 0.99, "once damaged: no stealth")
+  })
+  test("an enemy in sight does not stop the arming walk while stealthy", () => {
+    const r = new Runner()
+    r.t = 5
+    assert.equal(r.step((o) => { o.mechs = [enemy(5, [150, 0, 0])]; o.pickups = [{ id: 8001, kind: "laser", pos: [-60, 0, 0] }] }).mode, "arm")
+  })
+  test("Combat does not open fire beyond stealthHoldFireBeyondM during the stealth opening", async () => {
+    const { RuleCombat } = await import("../src/combat/index.ts")
+    const w = new WorldModel(hello)
+    w.update(cleanObs((o) => { o.t = 5; o.tick = 100; o.mechs = [enemy(5, [100, 0, 0])] }))
+    assert.equal(new RuleCombat().decide({ world: w, map: null, deadline: NO_DEADLINE }).hasTarget, false)
+    const near = new WorldModel(hello)
+    near.update(cleanObs((o) => { o.t = 5; o.tick = 100; o.mechs = [enemy(5, [50, 0, 0])] }))
+    assert.equal(new RuleCombat().decide({ world: near, map: null, deadline: NO_DEADLINE }).hasTarget, true)
   })
 })

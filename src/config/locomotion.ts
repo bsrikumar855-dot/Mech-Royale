@@ -235,6 +235,14 @@ export const LOCOMOTION = {
   armMemoryS: 120,
   /** a remembered pickup counts as checked (gone) when it is not listed while within this fraction of vision ranges */
   armRecheckFrac: 0.9,
+
+  /**
+   * B3 opening stealth: while t < stealthS and we have not been damaged this match, move silently (speed <=
+   * stealthStepFrac x sound.step_speed, no boost) and keep arming even with an enemy in sight. Combat does not open fire
+   * on mechs beyond COMBAT.stealthHoldFireBeyondM meanwhile. Predicted-hit dodges are not slowed.
+   */
+  stealthS: 24,
+  stealthStepFrac: 0.9,
 } as const
 
 export const MAP = {

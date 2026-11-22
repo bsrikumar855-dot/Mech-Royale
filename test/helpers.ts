@@ -65,8 +65,8 @@ export function realMap(): { map: MapQuery; world: WorldJson; raw: Int16Array } 
 export function cleanObs(patch: (o: Observation) => void = () => {}, hello: Hello = fixtureHello()): Observation {
   const o = structuredClone(fixtureObs()[0] as Observation)
   const cfg = hello.config
-  o.tick = 200
-  o.t = 10
+  o.tick = 600
+  o.t = 30
   o.self.pos = [0, 0, 0]
   o.self.vel = [0, 0, 0]
   o.self.aim = [0, 0]

@@ -48,6 +48,9 @@ export class LocoState {
   escapeUntilT = Number.NEGATIVE_INFINITY
   lootBans: { x: number; y: number; until: number }[] = []
 
+  /** B3: we took non-zone damage at some point this match */
+  damagedOnce = false
+
   /** P6: laser / lightning pickups seen this match (listed only while visible), by id */
   pickupMem = new Map<number, { x: number; y: number; z: number; kind: string; seenT: number }>()
 
@@ -73,6 +76,7 @@ export class LocoState {
     this.escapeUntilT = Number.NEGATIVE_INFINITY
     this.lootBans = []
     this.pickupMem.clear()
+    this.damagedOnce = false
   }
 
   sync(world: WorldModel): void {

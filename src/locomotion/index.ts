@@ -171,6 +171,8 @@ export class EvasiveLocomotion implements Locomotion {
 
     // ---- strafe side: timer, bullet snap, laser dodge, blocked side
     const underFire = sn.losCount > 0 || sn.damagedRecently || sn.projectileNear
+    if (world.damage.some((d) => d.weapon !== "zone")) S.damagedOnce = true
+    const stealth = t < L.stealthS && !S.damagedOnce
     if (sn.active) S.tickStrafe(t)
     const b = sn.bearing
     const side = (): Vec2 | null => (b === null ? null : [-Math.sin(b) * S.strafeSign, Math.cos(b) * S.strafeSign])
@@ -222,7 +224,7 @@ export class EvasiveLocomotion implements Locomotion {
       mode = "shrink"
       const inward = zoneDir() ?? toward(nextC[0], nextC[1])
       dir = inward && perp && underFire ? norm(add(inward, perp, L.shrinkWeave)) : inward
-    } else if (underFire && perp && b !== null) {
+    } else if (underFire && perp && b !== null && !(stealth && armPick)) {
       const towardThreat: Vec2 = [Math.cos(b), Math.sin(b)]
       const close = sn.enemies.some((e) => e.dist < (e.lightning ? L.closeLightningM : L.closeM))
       const close18 = hpFrac > L.closeLootMinHpFrac && sn.losCount <= 1 ? this.pickLoot(world, inSafe, L.closeLootM) : null
@@ -352,8 +354,15 @@ export class EvasiveLocomotion implements Locomotion {
 
     this.lastMode = mode
     if (!dir) return { move: [0, 0], boost: false, jump }
-    const mag = clamp(Math.hypot(dir[0], dir[1]), 0, 1)
-    const unit: Vec2 = [dir[0] / mag, dir[1] / mag]
+    let mag = clamp(Math.hypot(dir[0], dir[1]), 0, 1)
+    const unitMag = mag
+    if (stealth && mode !== "mortar" && mode !== "outside") {
+      // B3: silent opening (no step sounds): speed below the step threshold, no boost
+      const stepSpeed = cfg(world.config.sound, "step_speed", 0)
+      if (stepSpeed > 0) mag = Math.min(mag, (L.stealthStepFrac * stepSpeed) / walk)
+      boost = false
+    }
+    const unit: Vec2 = [dir[0] / unitMag, dir[1] / unitMag]
     let steered = steer(map, world, S, unit)
     // Unstick: the local feeler is boxed in. Ask the Dijkstra grid for a real route toward where we were already
     // heading, instead of standing still (see LOCOMOTION.unstickLookaheadM).

@@ -263,8 +263,8 @@ describe("defensive facing (rear armor): threat bearing sources and priority", (
 
   test("with no damage: the last seen enemy (kept after it leaves view), then combat sounds, nearest first", () => {
     const w = new WorldModel(fixtureHello())
-    run((o) => (o.mechs = [enemy(5, [10, 30, 0])]), w) // seen at t = 10
-    const later = run((o) => { o.t = 12; o.tick = 240 }, w) // gone from view 2 s later
+    run((o) => (o.mechs = [enemy(5, [10, 30, 0])]), w) // seen at t = 30
+    const later = run((o) => { o.t = 32; o.tick = 640 }, w) // gone from view 2 s later
     assert.ok(Math.abs(later.threatBearing! - yawTo(-20, -20, 10, 30)) < 1e-9)
 
     const sound = run((o) => {

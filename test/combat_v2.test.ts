@@ -167,9 +167,9 @@ describe("laser: hold to charge, release to fire", () => {
     const world = new WorldModel(hello)
     const tick = (t: number, mechs: boolean) =>
       fight((o) => { o.t = t; o.tick = Math.round(t * 20); withLaser(o, laser({ charge: 0.4 })); o.self.aim = [2, 0]; o.mechs = mechs ? [enemy(5, [100, 0, 0])] : [] }, { combat, world })
-    assert.equal(tick(10, true).fire[1], true)
-    assert.equal(tick(10.2, false).fire[1], true, "0.2 s without LOS: keep it")
-    assert.equal(tick(10.4, false).fire[1], false, "0.4 s: release")
+    assert.equal(tick(30, true).fire[1], true)
+    assert.equal(tick(30.2, false).fire[1], true, "0.2 s without LOS: keep it")
+    assert.equal(tick(30.4, false).fire[1], false, "0.4 s: release")
   })
   test("releases right before the target slips behind cover", () => {
     // synthetic map: building A at x 0..10, y 0..10; we stand at (-20,-20); the target crosses north behind it
@@ -248,7 +248,7 @@ describe("safe crate and drone farming", () => {
   test("no farming with an enemy tracked within 50 m (even out of sight), below 65% HP, outside the zone, or beyond 45 m", () => {
     const world = new WorldModel(hello)
     farm((o) => (o.mechs = [enemy(5, [40, 10, 0])]), world)
-    const later = farm((o) => { o.t = 11; o.tick = 220 }, world) // gone from view 1 s later, still tracked
+    const later = farm((o) => { o.t = 31; o.tick = 620 }, world) // gone from view 1 s later, still tracked
     assert.equal(later.hasTarget, false)
     assert.equal(farm((o) => (o.self.hp = o.self.max_hp * 0.6)).hasTarget, false)
     assert.equal(farm((o) => (o.self.in_zone = false)).hasTarget, false)
@@ -419,8 +419,8 @@ describe("submission 5: short-flicker aim lock", () => {
     const world = new WorldModel(hello)
     const tick = (t: number, mechs: ReturnType<typeof enemy>[]) =>
       fight((o) => { o.t = t; o.tick = Math.round(t * 20); o.mechs = mechs }, { combat, world })
-    tick(10, [enemy(5, [100, 0, 0], { vel: [0, 10, 0] })])
-    const out = tick(10.3, [])
+    tick(30, [enemy(5, [100, 0, 0], { vel: [0, 10, 0] })])
+    const out = tick(30.3, [])
     assert.equal(out.hasTarget, true)
     assert.deepEqual(out.fire, [false, false])
     assert.ok(out.aim[0] > Math.atan2(3, 100) - 1e-6, `leads past the 3 m it moved: ${out.aim[0]}`)
@@ -430,8 +430,8 @@ describe("submission 5: short-flicker aim lock", () => {
     const world = new WorldModel(hello)
     const tick = (t: number, mechs: ReturnType<typeof enemy>[]) =>
       fight((o) => { o.t = t; o.tick = Math.round(t * 20); o.mechs = mechs }, { combat, world })
-    tick(10, [enemy(5, [100, 0, 0])])
-    const out = tick(10.2, [enemy(6, [0, 60, 0])])
+    tick(30, [enemy(5, [100, 0, 0])])
+    const out = tick(30.2, [enemy(6, [0, 60, 0])])
     assert.ok(Math.abs(out.aim[0] - Math.PI / 2) < 0.02, "aims at the visible enemy 6")
   })
 })
@@ -442,13 +442,13 @@ describe("submission 5: per-match state reset", () => {
     const world = new WorldModel(hello)
     const tick = (t: number, mechs: ReturnType<typeof enemy>[]) =>
       fight((o) => { o.t = t; o.tick = Math.round(t * 20); o.self.weapons[0]!.ammo = 5; o.mechs = mechs }, { combat, world })
-    tick(10, [enemy(5, [100, 0, 0])])
-    const control = tick(10.2, [])
+    tick(30, [enemy(5, [100, 0, 0])])
+    const control = tick(30.2, [])
     assert.equal(control.reload, false)
     assert.equal(control.hasTarget, true, "control: the lock holds without a reset")
-    tick(10.4, [enemy(5, [100, 0, 0])])
+    tick(30.4, [enemy(5, [100, 0, 0])])
     world.reset() // as Session does after warm-up: the next tick is NOT earlier, only resetCount tells
-    const after = tick(10.6, [])
+    const after = tick(30.6, [])
     assert.equal(after.reload, true, "fresh match: no LOS history, so a proactive reload is allowed")
     assert.equal(after.hasTarget, false, "fresh match: no lock on a target from the old match")
   })
