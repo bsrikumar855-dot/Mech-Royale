@@ -97,11 +97,13 @@ describe("A-D strafing with range control", () => {
     const r = once((o) => { o.self.hp = o.self.max_hp * 0.6; o.mechs = [enemy(5, [139, 0, 0])] })
     assert.equal(r.mode, "strafe")
   })
-  test("too close (< 42 m, or < 52 m against lightning): backpedal while strafing", () => {
+  test("too close (< 42 m, or < R + 16 m against lightning): backpedal while strafing", () => {
     const r = once((o) => (o.mechs = [enemy(5, [30, 0, 0])]))
     assert.equal(r.mode, "backpedal")
     assert.ok(r.out.move[0] < -0.3)
-    assert.equal(once((o) => (o.mechs = [enemy(5, [48, 0, 0], { weapons: ["gun", "lightning"] })])).mode, "backpedal")
+    const R = (hello.config.weapons.lightning as Record<string, number>).range! * L.lightningRangeMargin
+    const between = R + (L.lightningKiteExtraM + L.lightningBackpedalExtraM) / 2
+    assert.equal(once((o) => (o.mechs = [enemy(5, [between, 0, 0], { weapons: ["gun", "lightning"] })])).mode, "backpedal")
     assert.equal(once((o) => (o.mechs = [enemy(5, [48, 0, 0])])).mode, "strafe")
   })
   test("strafe direction reverses every 0.75-1.15 s, not on a constant period", () => {
@@ -505,5 +507,41 @@ describe("v5: snowball upgrade order", () => {
     const p = ECONOMY.upgradePriority
     assert.deepEqual([...p.slice(0, 7)].sort(), ["gun_damage", "gun_rate", "laser_charge", "laser_damage", "lightning_chain", "lightning_efficiency", "lightning_range"])
     assert.deepEqual([...p.slice(-3)].sort(), ["mortar_reload", "mortar_splash", "mortar_velocity"])
+  })
+})
+
+describe("anti-lightning field (1a)", () => {
+  const R = (hello.config.weapons.lightning as Record<string, number>).range! * L.lightningRangeMargin
+  test("a lightning carrier inside R + 6 m: lightningKite runs away with a boost", () => {
+    const r = once((o) => (o.mechs = [enemy(5, [R, 0, 0], { weapons: ["gun", "lightning"] })]))
+    assert.equal(r.mode, "lightningKite")
+    assert.ok(r.out.move[0] < -0.5, `move ${r.out.move}`)
+    assert.equal(r.out.boost, true)
+  })
+  test("no kite boost while our own laser charges", () => {
+    const r = once((o) => {
+      o.mechs = [enemy(5, [R, 0, 0], { weapons: ["gun", "lightning"] })]
+      o.self.weapons = [o.self.weapons[0]!, laser(0.3)]
+    })
+    assert.equal(r.mode, "lightningKite")
+    assert.equal(r.out.boost, false)
+  })
+  test("a carrier beyond R + 6 m, or a plain gunner at the same range, does not kite", () => {
+    assert.notEqual(once((o) => (o.mechs = [enemy(5, [R + L.lightningKiteExtraM + 2, 0, 0], { weapons: ["gun", "lightning"] })])).mode, "lightningKite")
+    assert.notEqual(once((o) => (o.mechs = [enemy(5, [R, 0, 0])])).mode, "lightningKite")
+  })
+  test("a nearly dead carrier already outside R is left to Combat", () => {
+    const r = once((o) => (o.mechs = [enemy(5, [R + 2, 0, 0], { weapons: ["gun", "lightning"], hp: 100, max_hp: 1400 })]))
+    assert.notEqual(r.mode, "lightningKite")
+  })
+  test("loot within R + 16 m of a carrier is skipped", () => {
+    const far = R + L.lightningLootAvoidExtraM + L.lightningKiteExtraM
+    const at = (weapons: ("gun" | "lightning")[]) =>
+      once((o) => {
+        o.mechs = [enemy(5, [far, 0, 0], { weapons })]
+        o.cubes = [{ id: 5001, pos: [15, 0, 0] }]
+      }).mode
+    assert.equal(at(["gun"]), "loot")
+    assert.notEqual(at(["gun", "lightning"]), "loot")
   })
 })

@@ -165,6 +165,27 @@ export const LOCOMOTION = {
    */
   unstickLookaheadM: 30,
   unstickRadiusM: 6,
+
+  /**
+   * Anti-lightning field (1a). R = config.weapons.lightning.range x lightningRangeMargin (unseen range upgrades).
+   * A tracked carrier inside R + lightningKiteExtraM -> lightningKite (run, scored headings). Backpedal against a
+   * carrier inside R + lightningBackpedalExtraM; loot within R + lightningLootAvoidExtraM of a carrier is skipped.
+   */
+  lightningKite: true as boolean,
+  lightningRangeMargin: 1.2,
+  lightningKiteExtraM: 6,
+  lightningBackpedalExtraM: 16,
+  lightningLootAvoidExtraM: 16,
+  /** headings tried: away from the carriers, +- these offsets */
+  lightningKiteOffsetsDeg: [0, 30, -30, 60, -60, 90, -90] as readonly number[],
+  lightningKiteProbeM: 8,
+  /** score = metres gained - unsafe penalty - per-other-enemy-LOS penalty - blocked penalty */
+  lightningKiteUnsafePenalty: 50,
+  lightningKiteLosPenalty: 4,
+  lightningKiteBlockedPenalty: 20,
+  lightningKiteBoostMinEnergy: 15,
+  /** a carrier at this hp fraction or lower, already outside R, is left to Combat (no kite) */
+  lightningFinishHpFrac: 0.25,
 } as const
 
 export const MAP = {

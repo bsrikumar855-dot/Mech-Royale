@@ -19,6 +19,8 @@ export interface SensedEnemy {
   los: boolean
   charging: boolean
   lightning: boolean
+  /** hp fraction when the server shows it, else 1 */
+  hpFrac: number
   muzzle: Vec3
 }
 
@@ -42,6 +44,10 @@ export interface Sensed {
   mortarEscape: Vec2 | null
   /** unit vector away from a bullet ray about to pass through us, or null */
   bulletEscape: Vec2 | null
+  /** assumed reach of an enemy lightning (config range x margin for unseen upgrades) */
+  lightningR: number
+  /** tracked (listed or remembered) enemy lightning carriers, nearest first */
+  lightningCarriers: SensedEnemy[]
 }
 
 const num = (rec: Record<string, number | undefined> | undefined, k: string, f: number): number => {
@@ -71,6 +77,7 @@ export function sense(world: WorldModel, map: MapQuery | null, ourRadius: number
       los: false,
       charging: e.charging,
       lightning: e.weapons.includes("lightning"),
+      hpFrac: typeof e.hp === "number" && typeof e.maxHp === "number" && e.maxHp > 0 ? e.hp / e.maxHp : 1,
       muzzle: [e.pos[0], e.pos[1], e.pos[2] + muzzleH] as Vec3,
     }))
     .sort((a, b) => Number(b.charging) - Number(a.charging) || a.dist - b.dist)
@@ -158,6 +165,8 @@ export function sense(world: WorldModel, map: MapQuery | null, ourRadius: number
   }
 
   const losCount = losEnemies.length
+  const lightningR = num(world.config.weapons.lightning as Record<string, number | undefined>, "range", 0) * L.lightningRangeMargin
+  const lightningCarriers = enemies.filter((e) => e.lightning).sort((a, b) => a.dist - b.dist)
   return {
     enemies,
     losCount,
@@ -171,5 +180,7 @@ export function sense(world: WorldModel, map: MapQuery | null, ourRadius: number
     chargers,
     mortarEscape,
     bulletEscape,
+    lightningR,
+    lightningCarriers,
   }
 }
