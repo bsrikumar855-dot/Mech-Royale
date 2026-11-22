@@ -195,6 +195,8 @@ export class RuleCombat implements Combat {
   private lastEnemyLosT = Number.NEGATIVE_INFINITY
   /** The last mech target that had a shot line, and when (short-flicker aim lock). */
   private lastLosTarget: { id: number; t: number } | null = null
+  /** only-hunters: enemy id -> last match time it damaged us */
+  private attackers = new Map<number, number>()
   private epoch = -1
   private lastTick: number | null = null
 
@@ -203,6 +205,7 @@ export class RuleCombat implements Combat {
       this.laserSeenT = Number.NEGATIVE_INFINITY
       this.lastEnemyLosT = Number.NEGATIVE_INFINITY
       this.lastLosTarget = null
+      this.attackers.clear()
       this.epoch = world.resetCount
     }
     this.lastTick = world.tick
@@ -241,9 +244,26 @@ export class RuleCombat implements Combat {
       return c
     }
 
+    const fullHpOf = (): number => cfgNum(world.config.mech as Record<string, unknown>, "hp", self.max_hp)
     const mechs = (obs.mechs ?? []).filter((m) => m.kind === "mech").map(view)
     const mechHasLos = mechs.some((c) => c.los)
-    let pool = mechs.filter((c) => c.los && c.dist <= engageRange)
+    for (const e of obs.events ?? []) if (e.type === "damaged" && typeof e.by === "number" && e.by < 100) this.attackers.set(e.by, world.t)
+    // only-hunters: never shoot a house bot that is not after us (damaging it recruits it into the hunt)
+    const isHunter = (c: Cand): boolean => {
+      if (!COMBAT.onlyHunters || !c.a) return true
+      const t = world.t
+      if (t - (this.attackers.get(c.id) ?? Number.NEGATIVE_INFINITY) <= COMBAT.hunterRecentS) return true
+      if (this.lastLosTarget && this.lastLosTarget.id === c.id && t - this.lastLosTarget.t <= COMBAT.hunterStickyS) return true
+      if (c.dist <= COMBAT.hunterCloseM) return true
+      if (c.a.charging) return true
+      const maxHp = c.a.max_hp ?? fullHpOf()
+      if (c.hp !== undefined && maxHp > 0 && c.hp / maxHp < COMBAT.hunterLowHpFrac) return true
+      const dx = self.pos[0] - c.a.pos[0]
+      const dy = self.pos[1] - c.a.pos[1]
+      const d = Math.max(1, Math.hypot(dx, dy))
+      return (c.a.vel[0] * dx + c.a.vel[1] * dy) / d > COMBAT.hunterClosingMps
+    }
+    let pool = mechs.filter((c) => c.los && c.dist <= engageRange && isHunter(c))
     // v14: below npcFarmMinHpFrac a drone is shot only in self-defence (it damaged us within npcSelfDefenseS: its hits
     // reset the regen timer anyway); otherwise we hold fire so the 5 s regen timer can run out.
     const npcHitUs = world.damage.some((d) => d.by !== null && world.t - d.t <= COMBAT.npcSelfDefenseS && world.tracks.get(d.by)?.kind === "npc")

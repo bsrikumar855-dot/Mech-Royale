@@ -1,6 +1,6 @@
 /** Combat v2 + laser economy: distance gate, kill-confirm focus, regen hold, laser state machine, weaving, farming. */
 import assert from "node:assert/strict"
-import { describe, test } from "node:test"
+import { after, before, describe, test } from "node:test"
 import { aimAt, leadPoint, projectAim } from "../src/combat/aim.ts"
 import { gunFireTolerance, RuleCombat } from "../src/combat/index.ts"
 import { COMBAT, ECONOMY } from "../src/config/index.ts"
@@ -12,6 +12,13 @@ import type { Observation, Vec2, WeaponObs } from "../src/types/mechfight.ts"
 import { aimErrorRad, angleDiff } from "../src/world/geom.ts"
 import { WorldModel } from "../src/world/world.ts"
 import { cleanObs, ctxFor, enemy, fixtureHello, lightningWeapon, syntheticMap } from "./helpers.ts"
+
+// These tests pin the targeting / fire mechanics on static full-HP enemies beyond hunterCloseM, which the
+// only-hunters filter deliberately ignores; the filter itself is covered in only_hunters.test.ts.
+const huntCfg = COMBAT as { onlyHunters: boolean }
+const huntSaved = huntCfg.onlyHunters
+before(() => { huntCfg.onlyHunters = false })
+after(() => { huntCfg.onlyHunters = huntSaved })
 
 const hello = fixtureHello()
 const laserStats = { ...(hello.config.weapons.laser as Record<string, number>) }

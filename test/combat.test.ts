@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { describe, test } from "node:test"
+import { after, before, describe, test } from "node:test"
 import { aimAt, leadPoint } from "../src/combat/aim.ts"
 import { gunFireTolerance, RuleCombat, needsReload, pickTarget } from "../src/combat/index.ts"
 import { COMBAT } from "../src/config/index.ts"
@@ -7,6 +7,13 @@ import type { ActorObs, Observation, Vec2 } from "../src/types/mechfight.ts"
 import { aimErrorRad, yawTo } from "../src/world/geom.ts"
 import { WorldModel } from "../src/world/world.ts"
 import { cleanObs, ctxFor, enemy, fixtureHello, lightningWeapon, syntheticMap } from "./helpers.ts"
+
+// These tests pin the targeting / fire mechanics on static full-HP enemies beyond hunterCloseM, which the
+// only-hunters filter deliberately ignores; the filter itself is covered in only_hunters.test.ts.
+const huntCfg = COMBAT as { onlyHunters: boolean }
+const huntSaved = huntCfg.onlyHunters
+before(() => { huntCfg.onlyHunters = false })
+after(() => { huntCfg.onlyHunters = huntSaved })
 
 /**
  * Geometry used below (synthetic map: terrain z = 0.1 x, building A at x 0..10, y 0..10, top 20):

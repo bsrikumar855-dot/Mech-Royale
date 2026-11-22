@@ -90,6 +90,19 @@ export const COMBAT = {
    */
   flickerAimHoldS: 0.6,
 
+  /**
+   * Only hunters (experiment "only-hunters"): the practice squad sends more hunters as we hit them, so shooting a
+   * house bot that is not after us recruits it. Target an enemy mech only if it is hunting us: it damaged us within
+   * hunterRecentS, it is our sticky target, it is within hunterCloseM, it is closing in faster than
+   * hunterClosingMps, it is below hunterLowHpFrac of its HP, or it is charging a laser.
+   */
+  onlyHunters: true,
+  hunterRecentS: 10,
+  hunterCloseM: 60,
+  hunterClosingMps: 3,
+  hunterLowHpFrac: 0.3,
+  hunterStickyS: 3,
+
   /** Lightning costs `energy` per shot and spends the boost budget: only fire above this. */
   lightningMinEnergy: 12,
 
