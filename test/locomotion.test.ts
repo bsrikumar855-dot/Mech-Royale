@@ -625,3 +625,23 @@ describe("P6: arm early", () => {
     assert.notEqual(once((o) => { o.pickups = [lp(140)]; o.zone = { ...o.zone, radius: 100, next_radius: 100 } }).mode, "arm")
   })
 })
+
+describe("P9: arm early and the stuck escape both yield to the predictive dodge (evade.ts)", () => {
+  // a bullet 180 m east flying straight at us: beyond projectileAlertM (so not "under fire"), inside the dodge horizon
+  const bullet = (o: Observation) => (o.projectiles = [{ id: 1, kind: "gun", pos: [180, 0, 4.5], vel: [-252, 0, 0] }])
+  const westLaser = (o: Observation) => (o.pickups = [{ id: 8001, kind: "laser", pos: [-120, 0, 0] }])
+  test("arming west along the bullet's line: the dodge planner overrides; without the bullet we arm", () => {
+    assert.equal(once(westLaser).mode, "arm")
+    const x = once((o) => { westLaser(o); bullet(o) })
+    assert.equal(x.mode, "dodge")
+    assert.ok(Math.abs(x.out.move[1]) > 0.5, `sidestep, not straight down the line: ${x.out.move}`)
+  })
+  test("an active stuck escape does not override a dodge", () => {
+    const r = new Runner()
+    for (let i = 0; i <= L.stuckDecisions; i++) r.step((o) => (o.self.vel = [0, 0, 0]))
+    assert.equal(r.loco.state.escapes, 1, "escape started")
+    const x = r.step((o) => { o.self.vel = [0, 0, 0]; bullet(o) })
+    assert.equal(x.mode, "dodge")
+    assert.equal(x.out.jump, false, "the escape's jump is not applied during the dodge")
+  })
+})

@@ -111,7 +111,8 @@ export class EvasiveLocomotion implements Locomotion {
       if (this.lastLootPick) S.lootBans.push({ x: this.lastLootPick.x, y: this.lastLootPick.y, until: t + L.stuckLootBanS })
     }
     let res = out
-    if (S.escapeDir && t < S.escapeUntilT) {
+    // a predicted-hit dodge (evade.ts) outranks the escape: the escape resumes once the dodge is over
+    if (S.escapeDir && t < S.escapeUntilT && this.lastMode !== "dodge") {
       const d = (map ? steer(map, world, S, S.escapeDir) : null) ?? S.escapeDir
       res = { move: [d[0], d[1]], boost: !self.grounded && self.energy > L.stuckJetMinEnergy, jump: self.grounded }
     }
