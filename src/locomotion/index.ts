@@ -229,7 +229,13 @@ export class EvasiveLocomotion implements Locomotion {
       // v5 post-kill scoop: no shot line on us -> cubes up to 25 m; one shooter -> a cube within 14 m above 45% HP
       const scoopR = sn.losCount === 0 ? L.scoopNoLosM : sn.losCount === 1 && hpFrac > L.scoopOneLosMinHpFrac ? L.scoopOneLosM : 0
       const loot = close18 ?? (scoopR > 0 ? this.pickLoot(world, inSafe, scoopR, { cubesOnly: true }) : null)
-      if (sn.losCount >= 2 || hpFrac < L.woundedHpFrac) {
+      if (armPick && armPick.fresh && armPick.dist <= L.armDropUnderFireM && hpFrac > L.armDropUnderFireMinHpFrac && sn.losCount <= 1) {
+        // G2: a weapon just dropped by a kill (or a crate) close by: weave to it even under fire
+        mode = "arm"
+        this.lastLootPick = { x: armPick.x, y: armPick.y }
+        const ta = toward(armPick.x, armPick.y)
+        dir = armPick.dist > L.lootArriveM ? (ta ? norm(add(ta, perp, L.lootWeave)) : perp) : perp
+      } else if (sn.losCount >= 2 || hpFrac < L.woundedHpFrac) {
         mode = "retreat"
         dir = norm(add(perp, towardThreat, L.retreatBlend))
       } else if (close) {
@@ -455,21 +461,22 @@ export class EvasiveLocomotion implements Locomotion {
   }
 
   /** P6: until we hold a laser or lightning (with a free slot), the best remembered one in range inside the safe zone. */
-  private armTarget(world: WorldModel, inSafe: (x: number, y: number) => boolean): { x: number; y: number; kind: string; dist: number } | null {
+  private armTarget(world: WorldModel, inSafe: (x: number, y: number) => boolean): { x: number; y: number; kind: string; dist: number; fresh: boolean } | null {
     const self = world.self
     if (!self.weapons.some((w) => w === null)) return null
     if (self.weapons.some((w) => w?.kind === "laser" || w?.kind === "lightning")) return null
     const [px, py] = self.pos
-    let best: { x: number; y: number; kind: string; dist: number } | null = null
+    let best: { x: number; y: number; kind: string; dist: number; fresh: boolean } | null = null
     let bestV = 0
-    for (const m of this.state.pickupMem.values()) {
+    const firstDropId = 8000 + cfg(world.config.loot, "floor_count", 0)
+    for (const [id, m] of this.state.pickupMem) {
       const d = dist2d(px, py, m.x, m.y)
       if (d > L.armRangeM || !inSafe(m.x, m.y)) continue
       if (this.state.lootBans.some((b) => dist2d(m.x, m.y, b.x, b.y) < L.stuckLootBanM)) continue
       const v = (L.armBase[m.kind] ?? 0) / (1 + d / L.armHalfValueM)
       if (v > bestV) {
         bestV = v
-        best = { x: m.x, y: m.y, kind: m.kind, dist: d }
+        best = { x: m.x, y: m.y, kind: m.kind, dist: d, fresh: id >= firstDropId }
       }
     }
     return best

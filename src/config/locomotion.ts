@@ -223,7 +223,14 @@ export const LOCOMOTION = {
   armEarly: true as boolean,
   openingSweepS: 2,
   sweepLeadRad: 0.8,
-  armRangeM: 160,
+  armRangeM: 220, // G2: was 160
+  /**
+   * G2: weapons that appear after the start (death drops, crate drops: ids beyond 8000 + loot.floor_count) are armed
+   * even under fire when within armDropUnderFireM, with at most one shooter and above armDropUnderFireMinHpFrac.
+   * Forensics: when one appeared while we were unarmed we were under fire (retreat 46%), so arming never ran.
+   */
+  armDropUnderFireM: 60,
+  armDropUnderFireMinHpFrac: 0.5,
   armBase: { laser: 20, lightning: 18 } as Readonly<Record<string, number>>,
   armHalfValueM: 60,
   /** walk straight when this close; else follow a nav field toward the pickup (destination circle radius) */

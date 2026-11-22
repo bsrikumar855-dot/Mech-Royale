@@ -645,3 +645,22 @@ describe("P9: arm early and the stuck escape both yield to the predictive dodge 
     assert.equal(x.out.jump, false, "the escape's jump is not applied during the dodge")
   })
 })
+
+describe("G2: weapons dropped after the start are armed even under fire", () => {
+  const floor = (hello.config.loot as Record<string, number>).floor_count!
+  const at = (id: number, x: number, hpFrac = 1, shooters = 1) =>
+    once((o) => {
+      o.self.hp = o.self.max_hp * hpFrac
+      o.mechs = [enemy(5, [70, 0, 0]), enemy(6, [0, 80, 0])].slice(0, shooters)
+      o.pickups = [{ id, kind: "laser", pos: [x, 0, 0] }]
+    }).mode
+  test("a fresh drop within armDropUnderFireM with one shooter: arm", () => {
+    assert.equal(at(8000 + floor + 5, -40), "arm")
+  })
+  test("not a floor pickup, not beyond the radius, not wounded, not with two shooters", () => {
+    assert.notEqual(at(8001, -40), "arm")
+    assert.notEqual(at(8000 + floor + 5, -(L.armDropUnderFireM + 10)), "arm")
+    assert.notEqual(at(8000 + floor + 5, -40, L.armDropUnderFireMinHpFrac - 0.05), "arm")
+    assert.notEqual(at(8000 + floor + 5, -40, 1, 2), "arm")
+  })
+})
