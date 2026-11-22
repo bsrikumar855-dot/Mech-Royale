@@ -249,11 +249,13 @@ export class EvasiveLocomotion implements Locomotion {
       this.lastLootPick = { x: armPick.x, y: armPick.y }
       if (armPick.dist > L.lootArriveM) {
         let ad: Vec2 | null = null
-        if (armPick.dist > L.armStraightM && nav && navField?.done) {
+        if (L.armUseNav && armPick.dist > L.armStraightM && nav && navField?.done) {
+          // the zone pump above already advances the newest unfinished field (this one); a path exists once our cell
+          // is settled (Dijkstra settles by distance), long before the whole field is done
           const af = nav.field(armPick.x, armPick.y, L.armFieldRadiusM)
           if (af) {
-            nav.pump(false)
-            if (af.done) ad = nav.direction(af, px, py, self.pos[2])
+            ad = nav.direction(af, px, py, self.pos[2])
+            if (ad && !af.done) nav.settle(af)
           }
         }
         const tl = ad ?? toward(armPick.x, armPick.y)
