@@ -12,7 +12,7 @@
  *  7. idle                        -> wounded: hold still for regen; healthy: patrol the next circle's mid band
  * Every heading goes through a wall feeler with side commitment. All numbers: src/config/locomotion.ts.
  */
-import { LOCOMOTION as L, NAV } from "../config/index.ts"
+import { COMBAT, LOCOMOTION as L, NAV } from "../config/index.ts"
 import type { Locomotion, LocomotionOutput, LootTarget, TickContext } from "../types/contracts.ts"
 import type { Vec2, Vec3 } from "../types/mechfight.ts"
 import { angleDiff, clamp, dist2d, unit2, yawTo } from "../world/geom.ts"
@@ -410,10 +410,12 @@ export class EvasiveLocomotion implements Locomotion {
     const hpFrac = self.max_hp > 0 ? self.hp / self.max_hp : 1
     const mechs = obs.mechs ?? []
     // Combat only shoots drones while no enemy mech is listed at all: do not walk up to one it will not shoot.
-    if (hpFrac > L.huntNpcMinHpFrac && !mechs.some((m) => m.kind === "mech")) {
+    const farOut = COMBAT.farmOutsideAggro
+    if (hpFrac > (farOut ? COMBAT.farmNpcMinHpFrac : L.huntNpcMinHpFrac) && !mechs.some((m) => m.kind === "mech")) {
       const h = cfg(world.config.npc, "height", world.rules.height)
+      const standoff = farOut ? cfg(world.config.npc, "aggro_range", 45) + COMBAT.farmAggroMarginM : L.huntNpcStandoffM
       for (const m of mechs) {
-        if (m.kind === "npc") consider(m.pos[0], m.pos[1], "npc", L.huntTargetRangeM, undefined, { com: [m.pos[0], m.pos[1], m.pos[2] + h / 2], standoff: L.huntNpcStandoffM })
+        if (m.kind === "npc") consider(m.pos[0], m.pos[1], "npc", L.huntTargetRangeM, undefined, { com: [m.pos[0], m.pos[1], m.pos[2] + h / 2], standoff })
       }
     }
     if (hpFrac > L.huntCrateMinHpFrac) {
