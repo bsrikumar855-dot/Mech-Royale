@@ -228,6 +228,8 @@ export const LOCOMOTION = {
   armHalfValueM: 60,
   /** walk straight when this close; else follow a nav field toward the pickup (destination circle radius) */
   armStraightM: 12,
+  /** follow a zone-nav field to the pickup (else straight line + wall feeler + stuck escape) */
+  armUseNav: false as boolean,
   armFieldRadiusM: 6,
   /** forget a remembered pickup not seen for this long */
   armMemoryS: 120,

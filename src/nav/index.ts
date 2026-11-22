@@ -76,6 +76,14 @@ export class Navigator {
     }
   }
 
+  /**
+   * Stop building `f` early (P6): Dijkstra settles cells in distance order, so once the caller's own cell is settled
+   * every cell on its path to the destination is settled too; the rest of the flood is wasted per-tick budget.
+   */
+  settle(f: FieldBuild): void {
+    f.done = true
+  }
+
   direction(f: FieldBuild, x: number, y: number, z: number): [number, number] | null {
     return this.grid.direction(f, x, y, z)
   }
