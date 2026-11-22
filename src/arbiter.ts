@@ -55,6 +55,7 @@ export function mergeAction(inp: ArbiterInput): Action {
   // --- torso: Combat owns aim; with no target, face the threat (rear hits deal x rear_mult)
   let aim: unknown = combat.aim
   if (!combat.hasTarget && isFiniteNum(combat.threatBearing)) aim = [combat.threatBearing, 0]
+  else if (!combat.hasTarget && isFiniteNum(locomotion.scanYaw)) aim = [locomotion.scanYaw, 0]
   const clamped = clampAim(aim, world.rules.minPitch, world.rules.maxPitch)
   if (clamped) action.aim = clamped
   action.fire = [combat.fire[0] === true, combat.fire[1] === true]

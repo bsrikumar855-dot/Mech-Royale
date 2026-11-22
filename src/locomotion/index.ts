@@ -15,14 +15,14 @@
 import { LOCOMOTION as L, NAV } from "../config/index.ts"
 import type { Locomotion, LocomotionOutput, LootTarget, TickContext } from "../types/contracts.ts"
 import type { Vec2, Vec3 } from "../types/mechfight.ts"
-import { clamp, dist2d, unit2 } from "../world/geom.ts"
+import { angleDiff, clamp, dist2d, unit2, yawTo } from "../world/geom.ts"
 import type { WorldModel } from "../world/world.ts"
 import { navGridFor, Navigator } from "../nav/index.ts"
 import { sense, type Sensed } from "./sense.ts"
 import { LocoState } from "./state.ts"
 import { blockedAhead, steer } from "./steer.ts"
 
-export type Mode = "hunt" | "mortar" | "outside" | "laserDodge" | "shrink" | "retreat" | "backpedal" | "approach" | "strafe" | "loot" | "rim" | "hold" | "patrol" | "idle"
+export type Mode = "arm" | "hunt" | "mortar" | "outside" | "laserDodge" | "shrink" | "retreat" | "backpedal" | "approach" | "strafe" | "loot" | "rim" | "hold" | "patrol" | "idle"
 
 const add = (a: Vec2, b: Vec2, k: number): Vec2 => [a[0] + b[0] * k, a[1] + b[1] * k]
 const norm = (v: Vec2): Vec2 | null => unit2(v[0], v[1])
@@ -55,6 +55,8 @@ export class EvasiveLocomotion implements Locomotion {
   private navEpoch = -1
   /** P5: the loot target chosen this decision (banned if we get stuck walking to it) */
   private lastLootPick: { x: number; y: number } | null = null
+  /** P6: torso yaw to look along this decision (opening sweep / arming walk), if any */
+  private scanYaw: number | undefined = undefined
 
   reset(): void {
     this.state.reset()
@@ -76,7 +78,9 @@ export class EvasiveLocomotion implements Locomotion {
   }
 
   decide(ctx: TickContext, loot: readonly LootTarget[]): LocomotionOutput {
+    this.scanYaw = undefined
     const out = this.decideMode(ctx, loot)
+    if (this.scanYaw !== undefined && Number.isFinite(this.scanYaw)) out.scanYaw = this.scanYaw
     return L.stuckEscape ? this.stuckEscape(ctx, out) : out
   }
 
@@ -126,6 +130,7 @@ export class EvasiveLocomotion implements Locomotion {
     const S = this.state
     S.sync(world)
     this.lastLootPick = null
+    if (L.armEarly) this.rememberPickups(world, map)
 
     const self = world.self
     const t = world.t
@@ -194,6 +199,10 @@ export class EvasiveLocomotion implements Locomotion {
     let mode: Mode = "idle"
     const toward = (x: number, y: number): Vec2 | null => norm([x - px, y - py])
 
+    // P6 opening sweep: turn the torso all the way round once so vision finds the nearby weapons
+    if (L.armEarly && t < L.openingSweepS && !sn.active) this.scanYaw = self.aim[0] + L.sweepLeadRad
+    const armPick = L.armEarly ? this.armTarget(world, inSafe) : null
+
     if (sn.mortarEscape) {
       mode = "mortar"
       dir = sn.mortarEscape
@@ -234,6 +243,22 @@ export class EvasiveLocomotion implements Locomotion {
       } else {
         mode = "strafe"
         dir = perp
+      }
+    } else if (armPick) {
+      mode = "arm"
+      this.lastLootPick = { x: armPick.x, y: armPick.y }
+      if (armPick.dist > L.lootArriveM) {
+        let ad: Vec2 | null = null
+        if (armPick.dist > L.armStraightM && nav && navField?.done) {
+          const af = nav.field(armPick.x, armPick.y, L.armFieldRadiusM)
+          if (af) {
+            nav.pump(false)
+            if (af.done) ad = nav.direction(af, px, py, self.pos[2])
+          }
+        }
+        const tl = ad ?? toward(armPick.x, armPick.y)
+        dir = tl && perp && sn.active ? norm(add(tl, perp, L.lootWeave)) : tl
+        if (dir && !sn.active) this.scanYaw = Math.atan2(dir[1], dir[0])
       }
     } else {
       // v5 snowball gate: nobody can shoot us, nobody tracked within 50 m, inside the safe rim, not yet at 10 cubes + laser
@@ -373,6 +398,59 @@ export class EvasiveLocomotion implements Locomotion {
     if (hpFrac > L.huntCrateMinHpFrac) {
       const h = cfg(world.config.crates, "height", 0)
       for (const c of obs.crates ?? []) consider(c.pos[0], c.pos[1], "crate", L.huntTargetRangeM, undefined, { com: [c.pos[0], c.pos[1], c.pos[2] + h / 2], standoff: L.huntCrateStandoffM })
+    }
+    return best
+  }
+
+  /**
+   * P6: remember every laser / lightning pickup we see; forget one when its spot is in view (near range all round, or
+   * the vision wedge around our torso yaw, with a line of sight) and it is not listed, or after armMemoryS.
+   */
+  private rememberPickups(world: WorldModel, map: TickContext["map"]): void {
+    const mem = this.state.pickupMem
+    const obs = world.obs!
+    const t = world.t
+    const listed = new Set<number>()
+    for (const p of obs.pickups ?? []) {
+      listed.add(p.id)
+      if (p.kind === "laser" || p.kind === "lightning") mem.set(p.id, { x: p.pos[0], y: p.pos[1], z: p.pos[2], kind: p.kind, seenT: t })
+    }
+    if (mem.size === 0) return
+    const self = world.self
+    const [px, py, pz] = self.pos
+    const eye: Vec3 = [px, py, pz + world.selfStat("eye_height", world.rules.eyeHeight)]
+    const near = world.rules.nearRange * L.armRecheckFrac
+    const far = world.rules.visionRange * L.armRecheckFrac
+    const half = ((world.rules.fovDeg / 2) * L.armRecheckFrac * Math.PI) / 180
+    for (const [id, m] of mem) {
+      if (t - m.seenT > L.armMemoryS) {
+        mem.delete(id)
+        continue
+      }
+      if (listed.has(id)) continue
+      const d = dist2d(px, py, m.x, m.y)
+      const inView = d <= near || (d <= far && Math.abs(angleDiff(yawTo(px, py, m.x, m.y), self.aim[0])) <= half)
+      if (inView && (!map || map.hasVisionLOS(eye, [m.x, m.y, m.z + 0.5]))) mem.delete(id)
+    }
+  }
+
+  /** P6: until we hold a laser or lightning (with a free slot), the best remembered one in range inside the safe zone. */
+  private armTarget(world: WorldModel, inSafe: (x: number, y: number) => boolean): { x: number; y: number; kind: string; dist: number } | null {
+    const self = world.self
+    if (!self.weapons.some((w) => w === null)) return null
+    if (self.weapons.some((w) => w?.kind === "laser" || w?.kind === "lightning")) return null
+    const [px, py] = self.pos
+    let best: { x: number; y: number; kind: string; dist: number } | null = null
+    let bestV = 0
+    for (const m of this.state.pickupMem.values()) {
+      const d = dist2d(px, py, m.x, m.y)
+      if (d > L.armRangeM || !inSafe(m.x, m.y)) continue
+      if (this.state.lootBans.some((b) => dist2d(m.x, m.y, b.x, b.y) < L.stuckLootBanM)) continue
+      const v = (L.armBase[m.kind] ?? 0) / (1 + d / L.armHalfValueM)
+      if (v > bestV) {
+        bestV = v
+        best = { x: m.x, y: m.y, kind: m.kind, dist: d }
+      }
     }
     return best
   }

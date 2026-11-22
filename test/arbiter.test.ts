@@ -105,3 +105,15 @@ describe("arbiter invariants", () => {
     assert.equal(fitToLine({ tick: 1 }, 65536).tick, 1)
   })
 })
+
+describe("P6: locomotion scan yaw", () => {
+  test("used only when Combat has no target and no threat bearing", () => {
+    const w = worldWith(() => {})
+    const scan = mergeAction({ tick: 1, world: w, economy: econ(), combat: combat({ hasTarget: false, aim: [0, 0] }), locomotion: loco({ scanYaw: 1 }) })
+    assert.ok(Math.abs(scan.aim![0] - 1) < 1e-9)
+    const threat = mergeAction({ tick: 1, world: w, economy: econ(), combat: combat({ hasTarget: false, aim: [0, 0], threatBearing: 2 }), locomotion: loco({ scanYaw: 1 }) })
+    assert.ok(Math.abs(threat.aim![0] - 2) < 1e-9)
+    const target = mergeAction({ tick: 1, world: w, economy: econ(), combat: combat({ hasTarget: true, aim: [0.5, 0] }), locomotion: loco({ scanYaw: 1 }) })
+    assert.ok(Math.abs(target.aim![0] - 0.5) < 1e-9)
+  })
+})
