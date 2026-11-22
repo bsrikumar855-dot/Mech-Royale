@@ -20,6 +20,8 @@ const kit = resolve(arg("kit", join(import.meta.dirname, "..", "_kit")))
 const N = Number(arg("n", "30"))
 const SPREAD_DEG = Number(arg("spread", "0.6")) // treated as the Gaussian sigma (worst plausible reading for the shooter)
 const DUR = Number(arg("dur", "20"))
+const WEAPON = arg("weapon", "gun") // gun | laser
+const HOLD = arg("hold", "0") === "1" // laser: hold the charge (up to hold_s) until it sees us
 const L = await load(root, kit)
 const map = L.map
 const cfg = L.hello.config
@@ -90,6 +92,7 @@ async function trial(arm: Record<string, unknown>, cat: Cat, seed: number, D: nu
   const bot = new L.Bot(new L.WorldModel(L.hello), map)
   let bullets: Bul[] = []
   let nextShot = 0.3
+  let chargeStart: number | null = null
   let ammo = gun["mag"]!
   let fired = 0
   let hits = 0
@@ -118,7 +121,7 @@ async function trial(arm: Record<string, unknown>, cat: Cat, seed: number, D: nu
     s.in_zone = true
     s.stats = { ...mech }
     s.weapons = [{ kind: "gun", cooldown: 0, ammo: 12, reload: 0, stats: { ...gun } }, null]
-    obs.mechs = [{ id: 7, kind: "mech", pos: [sx, sy, sz], vel: [0, 0, 0], aim: [Math.atan2(y - sy, x - sx), 0], hp: 1400, max_hp: 1400, cubes: 0, weapons: ["gun"], charging: false }]
+    obs.mechs = [{ id: 7, kind: "mech", pos: [sx, sy, sz], vel: [0, 0, 0], aim: [Math.atan2(y - sy, x - sx), 0], hp: 1400, max_hp: 1400, cubes: 0, weapons: WEAPON === "laser" ? ["gun", "laser"] : ["gun"], charging: WEAPON === "laser" && chargeStart !== null }]
     obs.projectiles = bullets
       .filter((u) => {
         const d = Math.hypot(u.x - x, u.y - y)
@@ -179,8 +182,24 @@ async function trial(arm: Record<string, unknown>, cat: Cat, seed: number, D: nu
         energy = Math.max(0, energy - mech["boost_drain"]! * dt)
         lastSpend = t
       } else if (t - lastSpend > mech["energy_regen_delay"]!) energy = Math.min(100, energy + mech["energy_regen"]! * dt)
+      // laser shooter: charge 0.75 s (visible), then a hitscan beam at our CURRENT body (perfect tracking), cooldown 1.65 s
+      if (WEAPON === "laser") {
+        const muzzle: [number, number, number] = [sx, sy, sz + 7]
+        const sees = () => map.hasShotLOS(muzzle, [x, y, z + 4.5]) || map.hasShotLOS(muzzle, [x, y, z + 7.2])
+        if (chargeStart === null) {
+          if (t >= nextShot && Math.hypot(x - sx, y - sy) <= 280 && sees()) chargeStart = t
+        } else if (t - chargeStart >= 0.75 && (!HOLD || sees() || t - chargeStart >= 0.75 + 2)) {
+          fired++
+          if (sees()) {
+            hits++
+            pend.push({ type: "damaged", amount: 315, weapon: "laser", bearing: Math.atan2(sy - y, sx - x), by: 7 })
+          }
+          chargeStart = null
+          nextShot = t + 1.65
+        }
+      }
       // shooter: perfect linear lead on our current velocity, Gaussian spread
-      if (t >= nextShot) {
+      if (WEAPON === "gun" && t >= nextShot) {
         if (ammo <= 0) {
           ammo = gun["mag"]!
           nextShot = t + gun["reload"]!
@@ -248,7 +267,7 @@ const arms = (arg("arms", "off:evadeEnabled=false;on:evadeEnabled=true")).split(
   return { name: name!, o }
 })
 const total = arms.map(() => [0, 0])
-console.log(`spread sigma ${SPREAD_DEG} deg, ${DUR}s per trial, arms: ${arms.map((a) => a.name).join(" | ")}`)
+console.log(`weapon ${WEAPON}${WEAPON === 'laser' ? (HOLD ? ' (holds charge for a line)' : ' (releases at full charge)') : ''}, spread sigma ${SPREAD_DEG} deg, ${DUR}s per trial, arms: ${arms.map((a) => a.name).join(" | ")}`)
 for (const cat of cats) {
   for (const D of dists) {
     const agg = arms.map(() => [0, 0, 0])

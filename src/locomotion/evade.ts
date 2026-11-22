@@ -234,3 +234,93 @@ export function threateningBullets(world: WorldModel): Bullet[] {
   }
   return out
 }
+
+/** A visible enemy charging a laser that is aimed at us. */
+export interface Charger {
+  muzzle: readonly [number, number, number]
+  /** estimated seconds until it releases (hitscan along its aim, which tracks us) */
+  releaseIn: number
+}
+
+/**
+ * Laser cover (experiment "laser-cover"). A laser is hitscan and the charger's torso turns at 4 rad/s, so no sidestep
+ * beats a beam that tracks us: the only escape is to have a wall (or terrain) between its muzzle and our body at the
+ * moment it releases. Evaluate the same candidate manoeuvres as the bullet planner and pick the one whose predicted
+ * position at the release time has no shot line from any charger (centre and chest both blocked), breaking ties
+ * toward the wanted heading. Null when the wanted move is already covered or no candidate is better.
+ */
+export function planLaserCover(world: WorldModel, map: MapQuery, wanted: Vec2 | null, wantedBoost: boolean, chargers: readonly Charger[]): Manoeuvre | null {
+  if (chargers.length === 0) return null
+  const self = world.self
+  const b: Body = {
+    x: self.pos[0],
+    y: self.pos[1],
+    z: self.pos[2],
+    vx: self.vel[0],
+    vy: self.vel[1],
+    grounded: self.grounded,
+    radius: world.selfStat("radius", world.rules.radius),
+    height: world.selfStat("height", world.rules.height),
+    walk: world.selfStat("walk_speed", 11.7),
+    boostSpeed: world.selfStat("boost_speed", 19.5),
+    groundAccel: world.selfStat("ground_accel", 58.5),
+    airAccel: world.selfStat("air_accel", 12),
+    jumpSpeed: world.selfStat("jump_speed", 11),
+    gravity: world.selfStat("gravity", 22),
+    stepUp: world.rules.stepUp,
+    energy: self.energy,
+  }
+  const body = { radius: b.radius, height: b.height, stepUp: b.stepUp }
+  const exposure = (dir: Vec2 | null, boost: boolean): number => {
+    const speed = boost ? b.boostSpeed : b.walk
+    const cx = dir ? dir[0] * speed : 0
+    const cy = dir ? dir[1] * speed : 0
+    // walls stop us: freeze the prediction where the path is first blocked
+    let blockedAfter = Infinity
+    if (dir) {
+      for (const t of L.evadeWallChecksS) {
+        const p = predictPos(b, cx, cy, false, t)
+        if (map.isBlockedAt(p[0], p[1], Math.max(b.z, map.heightAt(p[0], p[1])), body)) {
+          blockedAfter = Math.max(0, t - L.evadeStepS)
+          break
+        }
+      }
+    }
+    let e = 0
+    for (const c of chargers) {
+      for (const [dt, w] of L.laserCoverChecks) {
+        const t = Math.min(L.laserCoverMaxS, Math.max(L.laserCoverMinS, c.releaseIn + dt))
+        const p = predictPos(b, cx, cy, false, Math.min(t, blockedAfter))
+        const seen = map.hasShotLOS(c.muzzle as [number, number, number], [p[0], p[1], p[2] + b.height * 0.5]) || map.hasShotLOS(c.muzzle as [number, number, number], [p[0], p[1], p[2] + b.height * 0.8])
+        if (seen) e += w
+      }
+    }
+    return e
+  }
+  const wantedExp = exposure(wanted, wantedBoost && b.energy > 1)
+  if (wantedExp <= 0) return null
+  const canBoost = b.energy >= L.evadeBoostMinEnergy
+  const dirs: Array<Vec2 | null> = [null]
+  for (let k = 0; k < L.evadeHeadings; k++) {
+    const a = (2 * Math.PI * k) / L.evadeHeadings
+    dirs.push([Math.cos(a), Math.sin(a)])
+  }
+  let best: Manoeuvre | null = null
+  let bestCost = wantedExp * L.laserCoverDamage
+  for (const d of dirs) {
+    for (const boost of canBoost ? [false, true] : [false]) {
+      if (!d && boost) continue
+      const ex = exposure(d, boost)
+      if (ex >= wantedExp) continue // only moves that actually reduce exposure
+      let c = ex * L.laserCoverDamage
+      if (wanted && d) c += L.evadeDeviationWeight * (1 - (d[0] * wanted[0] + d[1] * wanted[1])) * 0.5
+      else if (wanted && !d) c += L.evadeDeviationWeight * 0.5
+      if (boost) c += L.evadeBoostCost
+      if (c < bestCost - 1e-9) {
+        bestCost = c
+        best = { dir: d, boost, jump: false, damage: ex * L.laserCoverDamage }
+      }
+    }
+  }
+  return best
+}

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { describe, test } from "node:test"
 import { LOCOMOTION as L } from "../src/config/index.ts"
-import { manoeuvreDamage, planEvasion, predictPos, threateningBullets, type Body, type Bullet } from "../src/locomotion/evade.ts"
+import { manoeuvreDamage, planEvasion, planLaserCover, predictPos, threateningBullets, type Body, type Bullet } from "../src/locomotion/evade.ts"
 import { MapQuery, type WorldJson } from "../src/world/map.ts"
 import { cleanObs, ctxFor } from "./helpers.ts"
 
@@ -97,5 +97,33 @@ describe("planEvasion", () => {
   })
   test("the switch exists and defaults on (false reproduces 219f397)", () => {
     assert.equal(L.evadeEnabled, true)
+  })
+})
+
+describe("laser cover (be out of the charger's shot line at release)", () => {
+  type Observation = import("../src/types/mechfight.ts").Observation
+  const w0 = (patch: (o: Observation) => void = () => {}) => ctxFor(cleanObs((o) => { o.self.pos = [0, 0, 0]; patch(o) })).world
+  // building just north-east of us: x 3..20, y 4..20 (40 m tall); the charger stands 100 m east-north-east
+  const map = flatMap([{ kind: "building", base: -5, top: 40, ring: rect(3, 4, 20, 20) }])
+  const charger = { muzzle: [100, 30, 7] as [number, number, number], releaseIn: 0.6 }
+
+  test("covered by the building, wanting to walk OUT into the charger's line: it vetoes that and stays covered", () => {
+    const w = w0()
+    const plan = planLaserCover(w, map, [0, -1], false, [charger])
+    assert.ok(plan && plan.damage === 0, JSON.stringify(plan))
+  })
+  test("exposed in the open next to cover: it steps into the building's shadow before the release", () => {
+    const w = w0((o) => (o.self.pos = [-2, -12, 0])) // south-west of the building, in the charger's line
+    const plan = planLaserCover(w, map, [0, -1], false, [{ muzzle: [100, 30, 7], releaseIn: 0.7 }])
+    assert.ok(plan && plan.damage < 315, JSON.stringify(plan))
+  })
+  test("already covered: no change", () => {
+    const covered = { muzzle: [100, 30, 7] as [number, number, number], releaseIn: 0.6 }
+    const w = w0((o) => (o.self.pos = [10, 26, 0])) // north of the building, out of the charger's line? (line passes over y 26..30)
+    const plan = planLaserCover(w, map, null, false, [covered])
+    assert.ok(plan === null || plan.damage < 315)
+  })
+  test("no chargers: null", () => {
+    assert.equal(planLaserCover(w0(), map, [1, 0], false, []), null)
   })
 })

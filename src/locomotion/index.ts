@@ -21,9 +21,9 @@ import { navGridFor, Navigator } from "../nav/index.ts"
 import { sense, type Sensed } from "./sense.ts"
 import { LocoState } from "./state.ts"
 import { blockedAhead, steer } from "./steer.ts"
-import { planEvasion, threateningBullets } from "./evade.ts"
+import { planEvasion, planLaserCover, threateningBullets, type Charger } from "./evade.ts"
 
-export type Mode = "dodge" | "hunt" | "mortar" | "outside" | "laserDodge" | "shrink" | "retreat" | "backpedal" | "approach" | "strafe" | "loot" | "rim" | "hold" | "patrol" | "idle"
+export type Mode = "laserCover" | "dodge" | "hunt" | "mortar" | "outside" | "laserDodge" | "shrink" | "retreat" | "backpedal" | "approach" | "strafe" | "loot" | "rim" | "hold" | "patrol" | "idle"
 
 const add = (a: Vec2, b: Vec2, k: number): Vec2 => [a[0] + b[0] * k, a[1] + b[1] * k]
 const norm = (v: Vec2): Vec2 | null => unit2(v[0], v[1])
@@ -256,6 +256,34 @@ export class EvasiveLocomotion implements Locomotion {
     if (L.antiLeadHops && (sn.losCount >= 1 || sn.damagedForJump) && self.grounded && !ourLaserCharging && mode !== "mortar" && S.canJump(t)) {
       jump = true
       S.didJump(t)
+    }
+
+    // laser cover: a charger aimed at us -> be out of its shot line when it releases (beats any sidestep of a hitscan)
+    if (L.laserCoverEnabled && map && mode !== "mortar") {
+      const laserStats = world.config.weapons.laser as Record<string, number | undefined>
+      const full = laserStats["charge"] ?? 0.75
+      const seenNow = new Set<number>()
+      const chargers: Charger[] = []
+      for (const e of sn.enemies) {
+        if (!e.charging || !e.listed) continue
+        seenNow.add(e.id)
+        if (!S.chargeSeen.has(e.id)) S.chargeSeen.set(e.id, t)
+        const tr = world.tracks.get(e.id)
+        if (!tr) continue
+        const toUs = Math.atan2(py - e.y, px - e.x)
+        const off = Math.abs(Math.atan2(Math.sin(tr.aim[0] - toUs), Math.cos(tr.aim[0] - toUs)))
+        if (off > L.laserCoverAimTolRad) continue
+        chargers.push({ muzzle: e.muzzle, releaseIn: S.chargeSeen.get(e.id)! + full - t })
+      }
+      for (const id of [...S.chargeSeen.keys()]) if (!seenNow.has(id)) S.chargeSeen.delete(id)
+      const wanted = dir ? norm(dir) : null
+      const cover = planLaserCover(world, map, wanted, boost, chargers)
+      if (cover) {
+        mode = "laserCover"
+        this.lastMode = mode
+        if (!cover.dir) return { move: [0, 0], boost: false, jump }
+        return { move: [cover.dir[0], cover.dir[1]], boost: cover.boost, jump }
+      }
     }
 
     // predictive bullet evasion: replace the move only when the wanted one is predicted to be hit (never in a mortar escape)

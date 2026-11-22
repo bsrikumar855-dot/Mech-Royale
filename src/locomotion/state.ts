@@ -35,6 +35,8 @@ export class LocoState {
   wallCommitUntilT = Number.NEGATIVE_INFINITY
 
   isBoosting = false
+  /** laser cover: when each enemy was first seen charging (estimated release = that + full charge) */
+  chargeSeen = new Map<number, number>()
   patrolSign: 1 | -1 = 1
 
   reset(): void {
@@ -49,6 +51,7 @@ export class LocoState {
     this.wallCommitSide = 0
     this.wallCommitUntilT = Number.NEGATIVE_INFINITY
     this.isBoosting = false
+    this.chargeSeen.clear()
     this.patrolSign = 1
   }
 

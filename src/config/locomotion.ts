@@ -92,6 +92,17 @@ export const LOCOMOTION = {
   /** No jump candidates: airborne accel is 12 vs 58.5 on the ground (the 286d48c hops-off finding). */
   evadeAllowJump: false,
 
+  // ---- laser cover (experiment "laser-cover"): be out of a charger's shot line when it releases
+  laserCoverEnabled: true,
+  /** A charger counts only if its torso aim is within this of the bearing to us (it is charging at US). */
+  laserCoverAimTolRad: 0.3,
+  /** Release-time window: [offset from the estimated release, weight]; exposure is the weighted count of shot lines. */
+  laserCoverChecks: [[0, 1], [0.15, 0.5], [0.35, 0.25]] as ReadonlyArray<readonly [number, number]>,
+  laserCoverMinS: 0.1,
+  laserCoverMaxS: 1.0,
+  /** Damage-points weight of one unit of exposure (a full laser hit is 315). */
+  laserCoverDamage: 315,
+
   // ---- hops
   /** 1f: anti-lead hops under fire. Airborne we accelerate at air_accel (12) not ground_accel (58.5): no strafe/dodge. */
   antiLeadHops: false as boolean,
