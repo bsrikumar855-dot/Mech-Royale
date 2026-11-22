@@ -230,6 +230,9 @@ export const LOCOMOTION = {
   armStraightM: 12,
   /** follow a zone-nav field to the pickup (else straight line + wall feeler + stuck escape) */
   armUseNav: false as boolean,
+  /** P6b: under fire (one shooter at most, healthy), still weave to a laser / lightning this close */
+  armUnderFireM: 60,
+  armUnderFireMinHpFrac: 0.5,
   armFieldRadiusM: 6,
   /** forget a remembered pickup not seen for this long */
   armMemoryS: 120,

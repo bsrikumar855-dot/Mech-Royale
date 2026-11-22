@@ -232,6 +232,11 @@ export class EvasiveLocomotion implements Locomotion {
       if (sn.losCount >= 2 || hpFrac < L.woundedHpFrac) {
         mode = "retreat"
         dir = norm(add(perp, towardThreat, L.retreatBlend))
+      } else if (armPick && armPick.dist <= L.armUnderFireM && hpFrac > L.armUnderFireMinHpFrac && sn.losCount <= 1) {
+        mode = "arm"
+        this.lastLootPick = { x: armPick.x, y: armPick.y }
+        const ta = toward(armPick.x, armPick.y)
+        dir = armPick.dist > L.lootArriveM ? (ta ? norm(add(ta, perp, L.lootWeave)) : perp) : perp
       } else if (close) {
         mode = "backpedal"
         dir = norm(add(perp, towardThreat, L.backpedalBlend))

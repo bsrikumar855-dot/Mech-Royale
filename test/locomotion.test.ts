@@ -617,8 +617,10 @@ describe("P6: arm early", () => {
     assert.notEqual(x.mode, "arm")
     assert.equal(x.state.pickupMem.size, 0)
   })
-  test("under fire the usual evasion wins; already holding lightning -> no arming", () => {
-    assert.notEqual(once((o) => { o.pickups = [lp(60)]; o.mechs = [enemy(5, [70, 0, 0])] }).mode, "arm")
+  test("P6b under fire: weave to a weapon within armUnderFireM (one shooter, healthy), not farther, not with two shooters; already holding lightning -> no arming", () => {
+    assert.equal(once((o) => { o.pickups = [lp(-L.armUnderFireM + 5)]; o.mechs = [enemy(5, [70, 0, 0])] }).mode, "arm")
+    assert.notEqual(once((o) => { o.pickups = [lp(-L.armUnderFireM - 10)]; o.mechs = [enemy(5, [70, 0, 0])] }).mode, "arm")
+    assert.notEqual(once((o) => { o.pickups = [lp(-40)]; o.mechs = [enemy(5, [70, 0, 0]), enemy(6, [0, 70, 0])] }).mode, "arm")
     assert.notEqual(once((o) => { o.pickups = [lp(60)]; o.self.weapons = [o.self.weapons[0] ?? null, lightningWeapon()] }).mode, "arm")
   })
   test("outside the safe zone the target is skipped", () => {
