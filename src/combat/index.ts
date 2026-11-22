@@ -122,6 +122,21 @@ export function burstDamage(self: SelfObs, windowS: number): number {
   return dps * windowS
 }
 
+/**
+ * B4: a mech is "hot" (fair to open fire on) when it damaged us recently, is close, is aiming at us within range, or
+ * is finishable. Anything else we keep facing without firing so we don't wake more of the squad.
+ */
+export function isHot(world: WorldModel, c: Cand): boolean {
+  const t = world.t
+  if (world.damage.some((d) => d.by === c.id && t - d.t <= COMBAT.hotDamagedS)) return true
+  if (c.dist <= COMBAT.hotNearM) return true
+  if (c.hp !== undefined && c.hp <= COMBAT.hotFinishHp) return true
+  const a = c.a
+  if (!a || c.dist > COMBAT.hotAimRangeM) return false
+  const [sx, sy] = world.self.pos
+  return Math.abs(angleDiff(a.aim[0], yawTo(a.pos[0], a.pos[1], sx, sy))) <= COMBAT.hotAimDeg * DEG
+}
+
 /** The gun can fire: rounds in the magazine and not mid-reload. */
 export const gunReady = (gun: WeaponObs): boolean => (gun.ammo ?? 0) > 0 && (gun.reload ?? 0) === 0
 
@@ -208,6 +223,8 @@ export class RuleCombat implements Combat {
   private lastLosTarget: { id: number; t: number } | null = null
   /** B3: we took non-zone damage at some point this match */
   private damagedOnce = false
+  /** B4: the mech we are already fighting (kept while it stays in sight) */
+  private engagedId: number | null = null
   private epoch = -1
   private lastTick: number | null = null
 
@@ -217,6 +234,7 @@ export class RuleCombat implements Combat {
       this.lastEnemyLosT = Number.NEGATIVE_INFINITY
       this.lastLosTarget = null
       this.damagedOnce = false
+      this.engagedId = null
       this.epoch = world.resetCount
     }
     this.lastTick = world.tick
@@ -276,6 +294,10 @@ export class RuleCombat implements Combat {
         (c) => c.kind !== "mech" || (c.hp !== undefined && c.hp <= burstDamage(self, COMBAT.lateFinishWindowS)) || world.damage.some((d) => d.by === c.id && world.t - d.t <= COMBAT.lateAttackerMemoryS),
       )
     }
+    if (COMBAT.hotGate) {
+      if (this.engagedId !== null && !pool.some((c) => c.id === this.engagedId)) this.engagedId = null // dead or out of sight
+      pool = pool.filter((c) => c.kind !== "mech" || c.id === this.engagedId || isHot(world, c))
+    }
     const fullHp = cfgNum(world.config.mech as Record<string, unknown>, "hp", self.max_hp)
     const prio: PriorityContext = { holdsLaser: laser !== null, selfX: self.pos[0], selfY: self.pos[1], frontArcDeg: world.rules.frontArcDeg, fullHp }
     const target = pickTarget(pool, prio)
@@ -307,7 +329,10 @@ export class RuleCombat implements Combat {
       if (gun && gunSlot >= 0 && gunReady(gun) && !regenHold && target.dist <= gunRange && aimErrorRad(postSlewAim(world, aim), leadAim) <= gunFireTolerance(target.radius, target.dist)) {
         fire[gunSlot as 0 | 1] = true
       }
-      if (target.kind === "mech") this.lastLosTarget = { id: target.id, t: world.t }
+      if (target.kind === "mech") {
+        this.lastLosTarget = { id: target.id, t: world.t }
+        this.engagedId = target.id
+      }
     } else if (!mechHasLos && this.lastLosTarget && world.t - this.lastLosTarget.t < COMBAT.flickerAimHoldS) {
       // Short flicker (pillar, trunk): keep the torso on the lost target's extrapolated lead point. No fire (no LOS).
       const track = world.tracks.get(this.lastLosTarget.id)

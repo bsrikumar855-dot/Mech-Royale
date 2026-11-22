@@ -46,6 +46,18 @@ export const COMBAT = {
   /** finishable = HP <= the damage our gun (and lightning) deals in this window */
   lateFinishWindowS: 2,
 
+  // ---- B4 hot-target gate: open fire only on a mech that is engaging us (don't wake the rest of the squad)
+  hotGate: true as boolean,
+  /** it damaged us within this window */
+  hotDamagedS: 5,
+  /** it is this close */
+  hotNearM: 60,
+  /** its aim yaw points within hotAimDeg of us and it is within hotAimRangeM */
+  hotAimDeg: 12,
+  hotAimRangeM: 150,
+  /** finishable */
+  hotFinishHp: 350,
+
   // ---- regen hold-fire discipline (dealing damage resets the 5 s out-of-combat regen timer). Strict: never in a 1v1 brawl.
   regenHoldHpFrac: 0.35,
   /** Hold fire only on targets farther than this that we cannot finish (hp > killableHp). */
