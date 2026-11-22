@@ -128,6 +128,9 @@ export function manoeuvreDamage(b: Body, bullets: readonly Bullet[], cx: number,
 export function planEvasion(world: WorldModel, map: MapQuery | null, wanted: Vec2 | null, wantedBoost: boolean, bullets: readonly Bullet[]): Manoeuvre | null {
   if (bullets.length === 0) return null
   const self = world.self
+  const charging = L.evadeChargeAware && self.weapons.some((w) => w?.kind === "laser" && (w.charge ?? 0) > 0)
+  const speedMult = charging ? world.selfStat("charge_move_mult", 1) : 1
+  const sizeMult = L.evadeCubeSize ? 1 + cubeSize(world) * Math.max(0, self.cubes ?? 0) : 1
   const b: Body = {
     x: self.pos[0],
     y: self.pos[1],
@@ -135,10 +138,10 @@ export function planEvasion(world: WorldModel, map: MapQuery | null, wanted: Vec
     vx: self.vel[0],
     vy: self.vel[1],
     grounded: self.grounded,
-    radius: world.selfStat("radius", world.rules.radius),
-    height: world.selfStat("height", world.rules.height),
-    walk: world.selfStat("walk_speed", 11.7),
-    boostSpeed: world.selfStat("boost_speed", 19.5),
+    radius: Math.max(world.selfStat("radius", world.rules.radius), world.rules.radius * sizeMult),
+    height: Math.max(world.selfStat("height", world.rules.height), world.rules.height * sizeMult),
+    walk: world.selfStat("walk_speed", 11.7) * speedMult,
+    boostSpeed: world.selfStat("boost_speed", 19.5) * speedMult,
     groundAccel: world.selfStat("ground_accel", 58.5),
     airAccel: world.selfStat("air_accel", 12),
     jumpSpeed: world.selfStat("jump_speed", 11),
@@ -206,6 +209,12 @@ export function planEvasion(world: WorldModel, map: MapQuery | null, wanted: Vec
     }
   }
   return best === wantedMove ? null : best
+}
+
+/** cubes.size_per_cube from hello.config (0 when absent). */
+function cubeSize(world: WorldModel): number {
+  const v = (world.config.cubes as Record<string, number | undefined> | undefined)?.["size_per_cube"]
+  return typeof v === "number" && Number.isFinite(v) ? v : 0
 }
 
 /** Visible enemy bullets (gun / NPC) that can still reach us. */

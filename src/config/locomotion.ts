@@ -91,6 +91,14 @@ export const LOCOMOTION = {
   evadeBoostMinEnergy: 20,
   /** No jump candidates: airborne accel is 12 vs 58.5 on the ground (the 286d48c hops-off finding). */
   evadeAllowJump: false,
+  /**
+   * Dodge fixes (experiment "dodge-fixes"). evadeChargeAware: while our laser charges we move at charge_move_mult (0.5)
+   * of walk / boost speed, so plan with that speed (the planner assumed full speed and picked sidesteps we could not
+   * make). evadeCubeSize: our body grows by cubes.size_per_cube per cube, uncapped; plan with the larger of the server's
+   * stats.radius / stats.height and the cube-grown size (safe whether or not the server already grows the stats).
+   */
+  evadeChargeAware: true as boolean,
+  evadeCubeSize: true as boolean,
 
   // ---- hops
   /** 1f: anti-lead hops under fire. Airborne we accelerate at air_accel (12) not ground_accel (58.5): no strafe/dodge. */
