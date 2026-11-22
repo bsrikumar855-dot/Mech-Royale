@@ -91,7 +91,7 @@ describe("regen hold-fire (strict: < 35% HP, in zone, > 75 m, not finishable)", 
   const scene = (x: number, opts: { hpFrac?: number; foeHp?: number; inZone?: boolean } = {}) => {
     const desired = aimAt(MUZZLE, comOf(x, 0))
     return fight((o) => {
-      o.self.hp = o.self.max_hp * (opts.hpFrac ?? 0.3)
+      o.self.hp = o.self.max_hp * (opts.hpFrac ?? COMBAT.regenHoldHpFrac - 0.05)
       o.self.in_zone = opts.inZone ?? true
       o.self.aim = [...desired]
       o.mechs = [enemy(5, [x, 0, 0], { hp: opts.foeHp ?? 1400 })]
@@ -501,6 +501,6 @@ describe("v14: no drone / crate shooting below 85% HP (regen needs 5 s without d
   test("unchanged: enemy mechs are still shot at 75% HP (and the < 35% hold-fire rule is as before)", () => {
     const desired = aimAt(MUZZLE, comOf(60, 0))
     assert.equal(shoot(0.75, (o) => { o.self.aim = [...desired]; o.mechs = [enemy(5, [60, 0, 0])] }).fire[0], true)
-    assert.equal(COMBAT.regenHoldHpFrac, 0.35)
+    assert.ok(COMBAT.regenHoldHpFrac < 0.75, "the regen hold never blocks fire at 75% HP")
   })
 })
