@@ -261,14 +261,15 @@ export class EvasiveLocomotion implements Locomotion {
 
     this.lastMode = mode
     if (!dir) return { move: [0, 0], boost: false, jump }
-    let mag = clamp(Math.hypot(dir[0], dir[1]), 0, 1)
+    const dirLen = Math.hypot(dir[0], dir[1])
+    let mag = clamp(dirLen, 0, 1)
     const silentModes: readonly Mode[] = ["patrol", "loot", "hunt"]
     if (ffa && L.ffaSilent && !underFire && silentModes.includes(mode)) {
       const stepSpeed = cfg(world.config.sound, "step_speed", 0)
       if (stepSpeed > 0) mag = Math.min(mag, (L.ffaSilentStepFrac * stepSpeed) / walk)
       boost = false
     }
-    const unit: Vec2 = [dir[0] / mag, dir[1] / mag]
+    const unit: Vec2 = [dir[0] / dirLen, dir[1] / dirLen]
     let steered = steer(map, world, S, unit)
     // Unstick: the local feeler is boxed in. Ask the Dijkstra grid for a real route toward where we were already
     // heading, instead of standing still (see LOCOMOTION.unstickLookaheadM).
