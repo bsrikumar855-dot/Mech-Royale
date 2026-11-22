@@ -64,6 +64,7 @@ export class LocoState {
     this.wallCommitUntilT = Number.NEGATIVE_INFINITY
     this.isBoosting = false
     this.patrolSign = 1
+    this.flightS = null
     this.lastCmdMag = 0
     this.lastCmdSpeed = 0
     this.lastCmdDir = null
@@ -86,8 +87,16 @@ export class LocoState {
     this.lastPos = [x, y]
   }
 
+  /** P8: bullet flight time to the gun-holder shooting at us (s), or null (fixed rhythm). Set every decision. */
+  flightS: number | null = null
+
   private flipPeriod(): number {
-    return L.flipMinS + (L.flipMaxS - L.flipMinS) * hash01(this.slot * 1000003 + this.flips * 7919 + 1)
+    const u = hash01(this.slot * 1000003 + this.flips * 7919 + 1)
+    if (this.flightS !== null) {
+      const f = L.reversalFactorMin + (L.reversalFactorMax - L.reversalFactorMin) * u
+      return Math.min(L.reversalMaxS, Math.max(L.reversalMinS, this.flightS * f))
+    }
+    return L.flipMinS + (L.flipMaxS - L.flipMinS) * u
   }
 
   /** Advance the strafe schedule while under threat: first activation just schedules, later ones flip on time. */
