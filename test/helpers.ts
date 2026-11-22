@@ -96,7 +96,8 @@ export const lightningWeapon = (hello: Hello = fixtureHello()): NonNullable<Obse
 })
 
 export function enemy(id: number, pos: [number, number, number], over: Partial<ActorObs> = {}): ActorObs {
-  return { id, kind: "mech", pos, vel: [0, 0, 0], aim: [0, 0], hp: 1400, max_hp: 1400, weapons: ["gun"], charging: false, ...over }
+  // default: facing the origin (where the tests put us), as a mech fighting us would
+  return { id, kind: "mech", pos, vel: [0, 0, 0], aim: [Math.atan2(-pos[1], -pos[0]), 0], hp: 1400, max_hp: 1400, weapons: ["gun"], charging: false, ...over }
 }
 
 /** A WorldModel that has seen `obs`, plus the TickContext the modules receive. */

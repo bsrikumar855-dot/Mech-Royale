@@ -239,10 +239,11 @@ describe("safe crate and drone farming", () => {
     assert.equal(out.fire[0], true)
   })
   test("stops the tick an enemy mech is in sight", () => {
-    const out = farm((o) => (o.mechs = [enemy(5, [150, 0, 0])]))
+    // B4: a mech aiming at us inside hotAimRangeM is hot
+    const out = farm((o) => (o.mechs = [enemy(5, [140, 0, 0])]))
     assert.ok(Math.abs(out.aim[0]) < 0.05)
     assert.equal(out.hasTarget, true, "targets the mech, not the crate")
-    const desired = aimAt(MUZZLE, comOf(150, 0))
+    const desired = aimAt(MUZZLE, comOf(140, 0))
     assert.ok(aimErrorRad(out.aim, desired) < 0.02)
   })
   test("no farming with an enemy tracked within 50 m (even out of sight), below 65% HP, outside the zone, or beyond 45 m", () => {
@@ -502,5 +503,21 @@ describe("v14: no drone / crate shooting below 85% HP (regen needs 5 s without d
     const desired = aimAt(MUZZLE, comOf(60, 0))
     assert.equal(shoot(0.75, (o) => { o.self.aim = [...desired]; o.mechs = [enemy(5, [60, 0, 0])] }).fire[0], true)
     assert.equal(COMBAT.regenHoldHpFrac, 0.35)
+  })
+})
+
+describe("B4: hot-target gate", () => {
+  const fightAt = (m: ReturnType<typeof enemy>, patch: (o: Observation) => void = () => {}) =>
+    fight((o) => { o.mechs = [m]; patch(o) })
+  test("a healthy mech at 120 m looking away is not opened on (we keep facing it)", () => {
+    const out = fightAt(enemy(5, [120, 0, 0], { aim: [0, 0] }))
+    assert.equal(out.hasTarget, false)
+    assert.deepEqual(out.fire, [false, false])
+  })
+  test("hot: it aims at us within 150 m, it damaged us, it is within 60 m, or it is finishable", () => {
+    assert.equal(fightAt(enemy(5, [120, 0, 0])).hasTarget, true, "aiming at us")
+    assert.equal(fightAt(enemy(5, [120, 0, 0], { aim: [0, 0] }), (o) => (o.events = [{ type: "damaged", amount: 45, weapon: "gun", bearing: 0, by: 5 }])).hasTarget, true, "damaged us")
+    assert.equal(fightAt(enemy(5, [55, 0, 0], { aim: [0, 0] })).hasTarget, true, "close")
+    assert.equal(fightAt(enemy(5, [120, 0, 0], { aim: [0, 0], hp: 300 })).hasTarget, true, "finishable")
   })
 })
