@@ -101,7 +101,7 @@ export const LOCOMOTION = {
 
   // ---- boost
   tacticalBoostStartEnergy: 30,
-  tacticalBoostHoldEnergy: 15,
+  tacticalBoostHoldEnergy: 25, // P12: was 15; keeps a boost reserve (evadeBoostMinEnergy 20) for the dodge planner
   mortarBoostMinEnergy: 8,
   laserDodgeBoostMinEnergy: 12,
 

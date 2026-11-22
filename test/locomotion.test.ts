@@ -199,14 +199,20 @@ describe("crossfire and wounded retreat with a latched boost", () => {
   test("wounded (< 42% HP) 1v1 also retreats", () => {
     assert.equal(once((o) => { o.self.hp = o.self.max_hp * 0.4; o.mechs = [enemy(5, [60, 0, 0])] }).mode, "retreat")
   })
-  test("boost latch: starts at >= 30 energy, holds down to 15, then stops", () => {
+  test("boost latch: starts at >= tacticalBoostStartEnergy, holds down to tacticalBoostHoldEnergy, then stops", () => {
     const r = new Runner()
     const at = (e: number) => r.step((o) => { o.self.energy = e; o.mechs = [enemy(5, [100, 0, 0]), enemy(6, [0, 120, 0])] }).out.boost
-    assert.equal(at(25), false, "25 < start")
-    assert.equal(at(35), true)
-    assert.equal(at(20), true, "latched")
-    assert.equal(at(14), false)
-    assert.equal(at(25), false, "no restart below 30")
+    const start = L.tacticalBoostStartEnergy
+    const hold = L.tacticalBoostHoldEnergy
+    assert.equal(at(start - 1), false, "below start")
+    assert.equal(at(start + 5), true)
+    assert.equal(at(hold), true, "latched down to the hold threshold")
+    assert.equal(at(hold - 1), false)
+    assert.equal(at(start - 1), false, "no restart below start")
+  })
+  test("P12: the retreat boost leaves the dodge planner its boost reserve (stops at or above evadeBoostMinEnergy)", () => {
+    assert.ok(L.tacticalBoostHoldEnergy > L.evadeBoostMinEnergy)
+    assert.ok(L.tacticalBoostHoldEnergy < L.tacticalBoostStartEnergy)
   })
 })
 
