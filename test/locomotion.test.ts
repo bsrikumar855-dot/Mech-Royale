@@ -625,3 +625,33 @@ describe("P6: arm early", () => {
     assert.notEqual(once((o) => { o.pickups = [lp(140)]; o.zone = { ...o.zone, radius: 100, next_radius: 100 } }).mode, "arm")
   })
 })
+
+describe("P7: boost-strafe under fire", () => {
+  const fight = (r: Runner, energy: number, extra: (o: Observation) => void = () => {}) =>
+    r.step((o) => { o.mechs = [enemy(5, [70, 0, 0])]; o.self.energy = energy; extra(o) })
+  test(`latch: starts at >= ${L.boostStrafeStartEnergy}, holds down to ${L.boostStrafeStopEnergy}, restarts only at >= ${L.boostStrafeStartEnergy}`, () => {
+    const r = new Runner()
+    let x = fight(r, L.boostStrafeStartEnergy - 1)
+    assert.equal(x.mode, "strafe")
+    assert.equal(x.out.boost, false, "below the start threshold")
+    assert.equal(fight(r, L.boostStrafeStartEnergy).out.boost, true)
+    assert.equal(fight(r, L.boostStrafeStopEnergy + 1).out.boost, true, "holds")
+    assert.equal(fight(r, L.boostStrafeStopEnergy).out.boost, false, "stops")
+    x = fight(r, L.boostStrafeStartEnergy - 1)
+    assert.equal(x.out.boost, false, "needs the start threshold again")
+  })
+  test("holding lightning keeps a reserve: stops at boostStrafeLightningReserve", () => {
+    const r = new Runner()
+    const lt = (o: Observation) => (o.self.weapons = [o.self.weapons[0] ?? null, lightningWeapon()])
+    assert.equal(fight(r, 100, lt).out.boost, true)
+    assert.equal(fight(r, L.boostStrafeLightningReserve + 1, lt).out.boost, true)
+    assert.equal(fight(r, L.boostStrafeLightningReserve, lt).out.boost, false)
+  })
+  test("never while our laser charges, never in the air, never when not under fire", () => {
+    assert.equal(fight(new Runner(), 100, (o) => (o.self.weapons = [o.self.weapons[0] ?? null, laser(0.3)])).out.boost, false)
+    assert.equal(fight(new Runner(), 100, (o) => (o.self.grounded = false)).out.boost, false)
+    const calm = new Runner().step((o) => (o.self.energy = 100))
+    assert.equal(calm.mode, "patrol")
+    assert.equal(calm.out.boost, false)
+  })
+})

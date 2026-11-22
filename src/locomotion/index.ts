@@ -321,6 +321,11 @@ export class EvasiveLocomotion implements Locomotion {
     if (mode === "retreat" && !ourLaserCharging) {
       S.isBoosting = energy >= (S.isBoosting ? L.tacticalBoostHoldEnergy : L.tacticalBoostStartEnergy)
       boost = S.isBoosting
+    } else if (L.boostStrafe && underFire && self.grounded && !ourLaserCharging && L.boostStrafeModes.includes(mode)) {
+      const holdsLightning = self.weapons.some((w) => w?.kind === "lightning")
+      const stop = Math.max(L.boostStrafeStopEnergy, holdsLightning ? L.boostStrafeLightningReserve : 0)
+      S.isBoosting = S.isBoosting ? energy > stop : energy >= L.boostStrafeStartEnergy
+      boost = S.isBoosting
     } else {
       S.isBoosting = false
     }

@@ -80,6 +80,17 @@ export const LOCOMOTION = {
   // ---- boost
   tacticalBoostStartEnergy: 30,
   tacticalBoostHoldEnergy: 15,
+  /**
+   * P7 boost-strafe: under fire and grounded, the strafe family (strafe / backpedal / approach) runs at boost speed
+   * (19.5 vs 11.7 m/s) with a latch: start at energy >= boostStrafeStartEnergy, stop at <= boostStrafeStopEnergy (or
+   * boostStrafeLightningReserve while we hold lightning: 3 energy per shot). Never while our laser charges; never in the
+   * air (boost in the air is a jet). The strafe reversal timing is unchanged.
+   */
+  boostStrafe: true as boolean,
+  boostStrafeModes: ["strafe", "backpedal", "approach"] as readonly string[],
+  boostStrafeStartEnergy: 45,
+  boostStrafeStopEnergy: 20,
+  boostStrafeLightningReserve: 30,
   mortarBoostMinEnergy: 8,
   laserDodgeBoostMinEnergy: 12,
 
