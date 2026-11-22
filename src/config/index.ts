@@ -1,5 +1,5 @@
 export { RULE_FALLBACKS } from "./rules.ts"
-export { RUNTIME, WORLD, MAP, LOCOMOTION } from "./locomotion.ts"
+export { RUNTIME, WORLD, MAP, LOCOMOTION, LOBBY } from "./locomotion.ts"
 export { COMBAT } from "./combat.ts"
 export { ECONOMY } from "./economy.ts"
 export { NAV } from "./nav.ts"

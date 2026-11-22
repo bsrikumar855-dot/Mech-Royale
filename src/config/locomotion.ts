@@ -31,6 +31,24 @@ export const WORLD = {
  * Locomotion v3: evasive anti-lead movement. Every weight, radius and threshold lives here; game physics (speeds,
  * gravity, splash, vision memory) are read live from hello.config / self.stats.
  */
+/** 2a lobby detector (src/world/lobby.ts): practice squad hunt vs free-for-all. */
+export const LOBBY = {
+  /** master switch: false pins the lobby to "squad" (practice behaviour everywhere) */
+  enabled: true as boolean,
+  mechIdMin: 0,
+  mechIdMax: 15,
+  /** a beam counts as "far" when its whole path stays beyond this from us ... */
+  farBeamClearM: 22,
+  /** ... and it does not end within this of us */
+  farBeamEndM: 25,
+  /** FFA when foreignDeaths >= earlyForeignDeaths before earlyBeforeS ... */
+  earlyForeignDeaths: 2,
+  earlyBeforeS: 150,
+  /** ... or foreignDeaths >= witnessedForeignDeaths with farBeams >= witnessedFarBeams */
+  witnessedForeignDeaths: 1,
+  witnessedFarBeams: 2,
+} as const
+
 export const LOCOMOTION = {
   // ---- zone
   /** Stay inside this fraction of the current radius (the rim is where the damage and the crowd are). */

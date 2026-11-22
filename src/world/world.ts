@@ -4,7 +4,9 @@
  *
  * Every buffer here is bounded (WORLD.*) so RSS stays far below 512 MB however long a match runs.
  */
-import { WORLD } from "../config/index.ts"
+import { LOBBY, WORLD } from "../config/index.ts"
+import { debug } from "../runtime/log.ts"
+import { newLobby, stepLobby, type LobbyKind, type LobbyState } from "./lobby.ts"
 import type { Config, DamagedEvent, Hello, Observation, SelfObs, Vec2, Vec3, WeaponKind } from "../types/mechfight.ts"
 import { clamp, isFiniteNum, lerp } from "./geom.ts"
 import { resolveRules, type Rules } from "./rules.ts"
@@ -64,6 +66,8 @@ export class WorldModel {
   tracks = new Map<number, Track>()
   sounds: HeardSound[] = []
   damage: DamageRecord[] = []
+  /** 2a: lobby detector state (practice squad vs FFA); see src/world/lobby.ts */
+  lobbyState: LobbyState = newLobby()
   private lastTick: number | null = null
   /** Incremented by every reset(): lets modules with their own memory (Locomotion) detect a new match. Read-only for them. */
   resetCount = 0
@@ -81,7 +85,13 @@ export class WorldModel {
     this.tracks.clear()
     this.sounds = []
     this.damage = []
+    this.lobbyState = newLobby()
     this.lastTick = null
+  }
+
+  /** 2a: "ffa" once the lobby detector has fired (never back), else "squad". */
+  get lobby(): LobbyKind {
+    return this.lobbyState.kind
   }
 
   get self(): SelfObs {
@@ -108,6 +118,11 @@ export class WorldModel {
     this.lastTick = obs.tick
     this.obs = obs
     const t = obs.t
+    if (LOBBY.enabled) {
+      const was = this.lobbyState.kind
+      this.lobbyState = stepLobby(this.lobbyState, obs)
+      if (was !== this.lobbyState.kind) debug(`lobby ${this.lobbyState.kind} t=${t} foreignDeaths=${this.lobbyState.foreignDeaths} farBeams=${this.lobbyState.farBeams}`)
+    }
 
     for (const m of obs.mechs ?? []) {
       let tr = this.tracks.get(m.id)
