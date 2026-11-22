@@ -647,7 +647,7 @@ describe("P9: arm early and the stuck escape both yield to the predictive dodge 
 })
 
 describe("G2: weapons dropped after the start are armed even under fire", () => {
-  const floor = (hello.config.loot as Record<string, number>).floor_count!
+  const floor = hello.config.loot.floor_count
   const at = (id: number, x: number, hpFrac = 1, shooters = 1) =>
     once((o) => {
       o.self.hp = o.self.max_hp * hpFrac
