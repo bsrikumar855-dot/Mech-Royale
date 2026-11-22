@@ -172,14 +172,16 @@ export const LOCOMOTION = {
    * P5 physical stuck escape. The feeler models the body footprint against buildings but terrain only under the
    * centre line, so along a steep bank (the stadium bowl) it can call a heading open while the body is wedged:
    * forensics found runs of up to 87 s pushing into a bank (3 of 4 such matches ended in a zone death). Truth is the
-   * server's own velocity: commanded |move| >= stuckCmdMin while grounded and slower than stuckSpeedMaxMps for
-   * stuckDecisions decisions in a row -> for stuckEscapeS, jump and jet (boost in the air, protocol: jump and jet to clear
+   * server's own velocity: the commanded speed (|move| x walk or boost speed, x charge_move_mult while our laser charges)
+   * is above stuckCmdMinWalkFrac x walk_speed and the server reports less than stuckSpeedRatio x that commanded speed,
+   * grounded, for stuckDecisions decisions in a row (deliberately slow moves such as the drop-ring micro-strafe or the
+   * half speed while our laser charges never qualify) -> for stuckEscapeS, jump and jet (boost in the air, protocol: jump and jet to clear
    * a ledge) along the last heading rotated by the next stuckEscapeDeg entry; flip the patrol side and ban the loot
    * target we were walking to for stuckLootBanS.
    */
   stuckEscape: true as boolean,
-  stuckCmdMin: 0.5,
-  stuckSpeedMaxMps: 2,
+  stuckCmdMinWalkFrac: 0.5,
+  stuckSpeedRatio: 0.25,
   stuckDecisions: 8,
   stuckEscapeS: 1,
   stuckEscapeDeg: [90, -90, 180, 45, -45] as readonly number[],

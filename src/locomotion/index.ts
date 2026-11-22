@@ -91,7 +91,8 @@ export class EvasiveLocomotion implements Locomotion {
     const self = world.self
     const t = world.t
     const hs = Math.hypot(self.vel[0], self.vel[1])
-    if (self.grounded) S.stuckN = S.lastCmdMag >= L.stuckCmdMin && hs < L.stuckSpeedMaxMps ? S.stuckN + 1 : 0
+    const walk = world.selfStat("walk_speed", 0)
+    if (self.grounded) S.stuckN = S.lastCmdSpeed > L.stuckCmdMinWalkFrac * walk && hs < L.stuckSpeedRatio * S.lastCmdSpeed ? S.stuckN + 1 : 0
     S.lootBans = S.lootBans.filter((b) => b.until > t)
     if (S.stuckN >= L.stuckDecisions && S.lastCmdDir) {
       S.stuckN = 0
@@ -111,6 +112,9 @@ export class EvasiveLocomotion implements Locomotion {
     }
     const m = Math.hypot(res.move[0], res.move[1])
     S.lastCmdMag = m
+    const charging = self.weapons.some((w) => w?.kind === "laser" && (w.charge ?? 0) > 0)
+    const top = res.boost && self.grounded ? world.selfStat("boost_speed", walk) : walk
+    S.lastCmdSpeed = Math.min(1, m) * top * (charging ? cfg(world.config.mech, "charge_move_mult", 1) : 1)
     S.lastCmdDir = m > 1e-9 ? [res.move[0] / m, res.move[1] / m] : null
     return res
   }
