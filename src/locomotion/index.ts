@@ -54,6 +54,8 @@ export class EvasiveLocomotion implements Locomotion {
   private nav: Navigator | null = null
   private navMap: unknown = null
   private navEpoch = -1
+  /** P5: the loot target chosen this decision (banned if we get stuck walking to it) */
+  private lastLootPick: { x: number; y: number } | null = null
 
   reset(): void {
     this.state.reset()
@@ -74,12 +76,53 @@ export class EvasiveLocomotion implements Locomotion {
     return this.nav
   }
 
-  decide(ctx: TickContext, _loot: readonly LootTarget[]): LocomotionOutput {
+  decide(ctx: TickContext, loot: readonly LootTarget[]): LocomotionOutput {
+    const out = this.decideMode(ctx, loot)
+    return L.stuckEscape ? this.stuckEscape(ctx, out) : out
+  }
+
+  /**
+   * P5: physical stuck detector on the server's reported velocity (independent of our map model) and the escape.
+   * Airborne decisions neither count nor reset the stuck streak.
+   */
+  private stuckEscape(ctx: TickContext, out: LocomotionOutput): LocomotionOutput {
+    const { world, map } = ctx
+    const S = this.state
+    if (!world.obs) return out
+    const self = world.self
+    const t = world.t
+    const hs = Math.hypot(self.vel[0], self.vel[1])
+    if (self.grounded) S.stuckN = S.lastCmdMag >= L.stuckCmdMin && hs < L.stuckSpeedMaxMps ? S.stuckN + 1 : 0
+    S.lootBans = S.lootBans.filter((b) => b.until > t)
+    if (S.stuckN >= L.stuckDecisions && S.lastCmdDir) {
+      S.stuckN = 0
+      const deg = L.stuckEscapeDeg[S.escapes % L.stuckEscapeDeg.length] ?? 90
+      S.escapes++
+      const a = (deg * Math.PI) / 180
+      const [dx, dy] = S.lastCmdDir
+      S.escapeDir = [dx * Math.cos(a) - dy * Math.sin(a), dx * Math.sin(a) + dy * Math.cos(a)]
+      S.escapeUntilT = t + L.stuckEscapeS
+      S.patrolSign = S.patrolSign === 1 ? -1 : 1
+      if (this.lastLootPick) S.lootBans.push({ x: this.lastLootPick.x, y: this.lastLootPick.y, until: t + L.stuckLootBanS })
+    }
+    let res = out
+    if (S.escapeDir && t < S.escapeUntilT) {
+      const d = (map ? steer(map, world, S, S.escapeDir) : null) ?? S.escapeDir
+      res = { move: [d[0], d[1]], boost: !self.grounded && self.energy > L.stuckJetMinEnergy, jump: self.grounded }
+    }
+    const m = Math.hypot(res.move[0], res.move[1])
+    S.lastCmdMag = m
+    S.lastCmdDir = m > 1e-9 ? [res.move[0] / m, res.move[1] / m] : null
+    return res
+  }
+
+  private decideMode(ctx: TickContext, _loot: readonly LootTarget[]): LocomotionOutput {
     const { world, map } = ctx
     const obs = world.obs
     if (!obs) return { move: [0, 0], boost: false, jump: false }
     const S = this.state
     S.sync(world)
+    this.lastLootPick = null
 
     const self = world.self
     const t = world.t
@@ -199,6 +242,7 @@ export class EvasiveLocomotion implements Locomotion {
         inSafe(px, py) &&
         (self.cubes < L.huntCubeCap || !holdsLaser)
       const loot = this.pickLoot(world, inSafe, Infinity, { hunt: huntOpen })
+      if (loot) this.lastLootPick = { x: loot.x, y: loot.y }
       if (loot && loot.standoff !== undefined && loot.com) {
         // drone / crate: walk in until Combat has a shot line within the stand-off, then hold still while it shoots
         mode = "hunt"
@@ -308,6 +352,7 @@ export class EvasiveLocomotion implements Locomotion {
     const consider = (x: number, y: number, kind: string, range: number, ring?: number, target?: { com: Vec3; standoff: number }): void => {
       const d = dist2d(px, py, x, y)
       if (d > Math.min(range, maxDist) || !inSafe(x, y)) return
+      for (const b of this.state.lootBans) if (dist2d(x, y, b.x, b.y) < L.stuckLootBanM) return
       const value = (L.lootBase[kind] ?? L.huntBase[kind] ?? 0) / (1 + d / L.lootHalfValueM)
       if (best && value <= best.value) return
       const pick: LootPick = { x, y, kind, dist: d, value }

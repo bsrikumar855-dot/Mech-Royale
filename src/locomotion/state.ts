@@ -37,6 +37,15 @@ export class LocoState {
   isBoosting = false
   patrolSign: 1 | -1 = 1
 
+  /** P5 stuck escape: last commanded move, consecutive stuck decisions, the active escape and loot bans. */
+  lastCmdMag = 0
+  lastCmdDir: Vec2 | null = null
+  stuckN = 0
+  escapes = 0
+  escapeDir: Vec2 | null = null
+  escapeUntilT = Number.NEGATIVE_INFINITY
+  lootBans: { x: number; y: number; until: number }[] = []
+
   reset(): void {
     this.lastTick = null
     this.lastPos = null
@@ -50,6 +59,13 @@ export class LocoState {
     this.wallCommitUntilT = Number.NEGATIVE_INFINITY
     this.isBoosting = false
     this.patrolSign = 1
+    this.lastCmdMag = 0
+    this.lastCmdDir = null
+    this.stuckN = 0
+    this.escapes = 0
+    this.escapeDir = null
+    this.escapeUntilT = Number.NEGATIVE_INFINITY
+    this.lootBans = []
   }
 
   sync(world: WorldModel): void {
