@@ -168,8 +168,8 @@ export const LOCOMOTION = {
   /** Below this HP, safe and unthreatened: stand still (silent) so the out-of-combat regen runs. */
   regenHoldHpFrac: 0.85,
   /** Healthy and idle: patrol along a band of the next circle (fraction of its radius). */
-  patrolInnerFrac: 0.4,
-  patrolOuterFrac: 0.75,
+  patrolInnerFrac: 0.2,
+  patrolOuterFrac: 0.55,
   /** Smaller next circles than this: patrol around the current one instead. */
   patrolMinRadiusM: 20,
 
