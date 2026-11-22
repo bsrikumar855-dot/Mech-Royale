@@ -7,10 +7,11 @@ Public repo, `https://github.com/bsrikumar855-dot/Mech-Royale.git`. TypeScript, 
 
 - **Objective:** top of the practice leaderboard (1 vs 15 built-in house bots) AND robust in the finals (16-mech FFA against other teams' bots, unseen seeds).
 - **Score** = `mean(16 - place)` over all matches. Placement is the order mechs die; last alive = 1st = 15 points; ties share a place; if the clock (480 s) runs out, survivors rank by HP.
-- **Placement counts, kills do not** (kills only drop cubes). **Survival outranks aggression: never take a risky trade.**
-- Baseline to beat: **1.15** (Python starter).
+- **Practice: kills are placement** (the 15 house bots hunt us as one squad and never fight each other, so our score = how many of them die before us; ghostHold scored -2.79). **FFA (finals): survival-first** (other mechs kill each other). The FFA policy is gated on `world.lobby` (`src/world/lobby.ts`).
+- Baseline to beat: **1.28** (Python starter).
 - **Deadlines (IST):** Sat 3:00 PM teammate handoff (parallel split) · Sun 2026-11-22 4:00 PM feature freeze · Sun 7:00 PM final candidate lock · Sun 9:30 PM hard cutoff.
-- **Submission cap: 4 per hour.** Every submission is a single-variable experiment (see `EXPERIMENTS.md`).
+- **Submission cap: 6 per hour.** Scorer builders-4: 96 fresh random seeds per submission; identical code keeps its first score (SE about +-0.4). Changes are decided by the local A/B (below), not the board.
+- **Code reuse:** excessive reuse, including another team's entry, may lead to disqualification. Write all bot code ourselves; never copy another team's code into `src/` (ideas are fine).
 
 ## Hard constraints (non-negotiable)
 
@@ -25,9 +26,11 @@ Public repo, `https://github.com/bsrikumar855-dot/Mech-Royale.git`. TypeScript, 
 | Repo | PUBLIC, <= 20 MB at every submitted commit. `_kit/` is gitignored. |
 | Gate | Every commit must pass `_kit/check/check.py` **inside the full sandbox flags** before submission. |
 
-## No simulator, no match logs
+## Local simulator (outside the repo), no match logs
 
-`check.py` replays 300 recorded observations that **do not react to our actions**: it proves protocol compliance and latency, not play quality. Scored matches return no stderr. So: every behaviour must be verified by unit tests against synthetic/recorded states, plus the practice score. Use the `debug` drawing field only for the team's own replays.
+`check.py` replays 300 recorded observations that **do not react to our actions**: it proves protocol compliance and latency, not play quality. Scored matches return no stderr.
+
+Play quality is measured with the public sim-lite simulator, a TEST TOOL kept OUTSIDE the repo (never committed, vendored or imported): `git clone https://github.com/anthonyteti/buildathon-mech-royale ../at-sim`; worktrees `../wt-base` (A) and `../wt-cand` (B); `../at-config.json` = the hello `config` from `_kit/check/stream.jsonl.gz`; `../opponents.json` maps `base`/`cand` to `node dist/index.js` in each worktree. `bash scripts/ab.sh practice <seed>` runs 96 paired practice matches; `bash scripts/ab.sh ffa <seed> 96 <n>` runs FFA (8 seats each). The sim is deterministic (A/A delta 0.00) and scores about 2 below official: trust paired deltas only. On Windows the sim needs `fileURLToPath` instead of `URL.pathname` (local patch). Keep rule and results: `EXPERIMENTS.md` "builders-4: local A/B protocol". Unit tests still cover every behaviour. **Docker is not usable on the dev PC:** the pre-submit gate is `npm run check` + native `python _kit/check/check.py -- node dist/index.js` + `python scripts/bench.py --pin-cpu 0 -- node dist/index.js` (decision p99 < 10 ms).
 
 ## Architecture (v3-real)
 
