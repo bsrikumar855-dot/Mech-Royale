@@ -319,11 +319,12 @@ describe("idle: patrol when healthy, silent regen hold when wounded", () => {
   test("wounded but a gun was heard: strafe, not hold", () => {
     assert.equal(once((o) => { o.self.hp = o.self.max_hp * 0.7; o.sounds = [{ kind: "gun", bearing: 2, dist: "near", age: 0.1 }] }).mode, "strafe")
   })
-  test("patrol stays in the next circle's 40-75% band", () => {
-    const at = (x: number) => once((o) => { o.self.pos = [x, 0, 0]; o.zone = { center: [0, 0], radius: 500, next_center: [0, 0], next_radius: 200, shrink_start: 1e6, shrink_end: 1e6 + 1, dps: 20 } }).out.move
-    assert.ok(at(30)[0] > 0, "too far in (15%): drift outward")
-    assert.ok(at(190)[0] < 0, "too far out (95%): drift inward")
-    assert.ok(Math.abs(at(115)[0]) < 0.05, "in the band: tangential")
+  test("patrol stays in the next circle's patrolInnerFrac..patrolOuterFrac band", () => {
+    const R = 200
+    const at = (x: number) => once((o) => { o.self.pos = [x, 0, 0]; o.zone = { center: [0, 0], radius: 500, next_center: [0, 0], next_radius: R, shrink_start: 1e6, shrink_end: 1e6 + 1, dps: 20 } }).out.move
+    assert.ok(at(R * L.patrolInnerFrac * 0.5)[0] > 0, "too far in: drift outward")
+    assert.ok(at(R * 0.95)[0] < 0, "too far out (95%): drift inward")
+    assert.ok(Math.abs(at((R * (L.patrolInnerFrac + L.patrolOuterFrac)) / 2)[0]) < 0.05, "in the band: tangential")
   })
 })
 
