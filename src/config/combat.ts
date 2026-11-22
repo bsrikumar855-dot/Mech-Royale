@@ -113,7 +113,7 @@ export const COMBAT = {
    * hunterRecentS, it is our sticky target, it is within hunterCloseM, it is closing in faster than
    * hunterClosingMps, it is below hunterLowHpFrac of its HP, or it is charging a laser.
    */
-  onlyHunters: true,
+  onlyHunters: false as boolean,
   hunterRecentS: 10,
   hunterCloseM: 60,
   hunterClosingMps: 3,

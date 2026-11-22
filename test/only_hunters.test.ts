@@ -1,6 +1,6 @@
 /** only-hunters: target an enemy mech only when it is hunting us (damaging a bystander recruits it). */
 import assert from "node:assert/strict"
-import { describe, test } from "node:test"
+import { after, before, describe, test } from "node:test"
 import { RuleCombat } from "../src/combat/index.ts"
 import { COMBAT } from "../src/config/index.ts"
 import type { ActorObs, Observation } from "../src/types/mechfight.ts"
@@ -13,7 +13,11 @@ const once = (m: ActorObs, patch: (o: Observation) => void = () => {}) =>
   decideWith(new RuleCombat(), new WorldModel(fixtureHello()), (o) => { o.mechs = [m]; patch(o) })
 
 describe("only-hunters target filter", () => {
-  test("defaults on", () => assert.equal(COMBAT.onlyHunters, true))
+  // stack-3 ships with the filter OFF (stack-4 4.98, teammate B4 hot-target 4.58); these tests keep the mechanism working
+  const huntCfg = COMBAT as { onlyHunters: boolean }
+  let saved = false
+  before(() => { saved = huntCfg.onlyHunters; huntCfg.onlyHunters = true })
+  after(() => { huntCfg.onlyHunters = saved })
 
   test("a static full-HP bystander at 120 m is not targeted (no fire)", () => {
     const out = once(enemy(5, FAR))
