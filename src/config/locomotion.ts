@@ -70,6 +70,31 @@ export const LOCOMOTION = {
   /** Any move whose 4 m lookahead leaves the safe rim is bent back inward. */
   rimLookaheadM: 4,
 
+  /** Noise calibration: reorders strafe / hop timing (same distributions). 0 = exact 219f397 timing. */
+  timingSalt: 0,
+
+  // ---- predictive bullet evasion (src/locomotion/evade.ts, experiment "evade")
+  /** Master switch (false = the 219f397 behaviour exactly). */
+  evadeEnabled: true,
+  /** Candidate headings (plus stop and the wanted heading). */
+  evadeHeadings: 16,
+  /** Prediction step and the longest look-ahead (a bullet farther than this in time is ignored this tick). */
+  evadeStepS: 0.05,
+  evadeHorizonS: 0.8,
+  /** Extra clearance added to body radius + projectile radius (aim / prediction error). */
+  evadeMarginM: 0.4,
+  /** Bullets farther than this are ignored (0.8 s at 252 m/s is ~200 m). */
+  evadeMaxBulletDistM: 210,
+  /** Times at which a candidate path is checked against walls (blocked = we stop there). */
+  evadeWallChecksS: [0.15, 0.35, 0.6] as readonly number[],
+  /** Cost of deviating from the wanted heading, in damage points at 180 degrees (a 45 dmg bullet beats a U-turn). */
+  evadeDeviationWeight: 30,
+  /** Small costs that keep boost / jump for when they actually save damage. */
+  evadeBoostCost: 4,
+  evadeJumpCost: 6,
+  evadeBoostMinEnergy: 20,
+  evadeAllowJump: true,
+
   // ---- hops
   jumpMinS: 1.8,
   jumpMaxS: 2.4,

@@ -20,8 +20,9 @@ import type { WorldModel } from "../world/world.ts"
 import { sense, type Sensed } from "./sense.ts"
 import { LocoState } from "./state.ts"
 import { blockedAhead, steer } from "./steer.ts"
+import { planEvasion, threateningBullets } from "./evade.ts"
 
-export type Mode = "hunt" | "mortar" | "outside" | "laserDodge" | "shrink" | "retreat" | "backpedal" | "approach" | "strafe" | "loot" | "rim" | "hold" | "patrol" | "idle"
+export type Mode = "dodge" | "hunt" | "mortar" | "outside" | "laserDodge" | "shrink" | "retreat" | "backpedal" | "approach" | "strafe" | "loot" | "rim" | "hold" | "patrol" | "idle"
 
 const add = (a: Vec2, b: Vec2, k: number): Vec2 => [a[0] + b[0] * k, a[1] + b[1] * k]
 const norm = (v: Vec2): Vec2 | null => unit2(v[0], v[1])
@@ -221,6 +222,22 @@ export class EvasiveLocomotion implements Locomotion {
     if ((sn.losCount >= 1 || sn.damagedForJump) && self.grounded && !ourLaserCharging && mode !== "mortar" && S.canJump(t)) {
       jump = true
       S.didJump(t)
+    }
+
+    // predictive bullet evasion: replace the move only when the wanted one is predicted to be hit (never in a mortar escape)
+    if (L.evadeEnabled && mode !== "mortar") {
+      const wanted = dir ? norm(dir) : null
+      const plan = planEvasion(world, map, wanted, boost, threateningBullets(world))
+      if (plan) {
+        mode = "dodge"
+        dir = plan.dir
+        boost = plan.boost
+        jump = plan.jump && self.grounded
+        if (jump) S.didJump(t)
+        this.lastMode = mode
+        if (!dir) return { move: [0, 0], boost: false, jump }
+        return { move: [dir[0], dir[1]], boost, jump } // the planner already checked the walls along this path
+      }
     }
 
     this.lastMode = mode
