@@ -503,7 +503,8 @@ describe("v5: snowball upgrade order", () => {
   test("the whole weapon-damage snowball (gun, laser, lightning) now leads the top 7 (submission 26); mortar_* are the last three", async () => {
     const { ECONOMY } = await import("../src/config/index.ts")
     const p = ECONOMY.upgradePriority
-    assert.deepEqual([...p.slice(0, 7)].sort(), ["gun_damage", "gun_rate", "laser_charge", "laser_damage", "lightning_chain", "lightning_efficiency", "lightning_range"])
+    assert.deepEqual([...p.slice(0, 3)], ["plating", "armor", "nanites"], "survival-first (experiment survival-upgrades)")
+    assert.deepEqual([...p.slice(3, 10)].sort(), ["gun_damage", "gun_rate", "laser_charge", "laser_damage", "lightning_chain", "lightning_efficiency", "lightning_range"])
     assert.deepEqual([...p.slice(-3)].sort(), ["mortar_reload", "mortar_splash", "mortar_velocity"])
   })
 })

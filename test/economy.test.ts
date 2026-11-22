@@ -18,15 +18,15 @@ describe("upgrade ranking and offer picking", () => {
     assert.deepEqual([...ECONOMY.upgradePriority].sort(), [...ids].sort(), "priority list and hello.config.upgrades must match exactly")
   })
 
-  test("submission 26: the whole weapon-damage snowball (gun + laser + lightning) now leads, then survivability, then regen/mobility: gun_rate > gun_damage > laser_damage > laser_charge > lightning_efficiency > armor > plating > nanites > servos", () => {
+  test("survival-first (experiment survival-upgrades): plating > armor > nanites > gun_rate > gun_damage > laser_damage > laser_charge > lightning_efficiency > lightning_range > lightning_chain > servos", () => {
     const rank = (id: string): number => ECONOMY.upgradePriority.indexOf(id)
-    for (const [a, b] of [["gun_rate", "gun_damage"], ["gun_damage", "laser_damage"], ["laser_damage", "laser_charge"], ["laser_charge", "lightning_efficiency"], ["lightning_efficiency", "lightning_range"], ["lightning_range", "lightning_chain"], ["lightning_chain", "armor"], ["armor", "plating"], ["plating", "nanites"], ["nanites", "servos"], ["servos", "gun_mag"], ["sensors", "mortar_reload"]] as const) {
-      assert.ok(rank(a) < rank(b), `${a} should outrank ${b}`)
-    }
+    const chain = ["plating", "armor", "nanites", "gun_rate", "gun_damage", "laser_damage", "laser_charge", "lightning_efficiency", "lightning_range", "lightning_chain", "servos"]
+    for (let k = 1; k < chain.length; k++) assert.ok(rank(chain[k - 1]!) < rank(chain[k]!), `${chain[k - 1]} should outrank ${chain[k]}`)
+    assert.ok(rank("sensors") < rank("mortar_reload"))
   })
 
   test("picks the best-ranked choice by index; an offer always produces a pick", () => {
-    assert.equal(bestUpgradeIndex([choice("gun_damage"), choice("armor"), choice("sensors")]), 0, "submission 24: gun_damage now outranks armor")
+    assert.equal(bestUpgradeIndex([choice("gun_damage"), choice("armor"), choice("sensors")]), 1, "survival-first: armor outranks gun_damage")
     assert.equal(bestUpgradeIndex([choice("lightning_chain"), choice("gun_rate"), choice("jets")]), 1)
     assert.equal(bestUpgradeIndex([choice("mortar_splash"), choice("sensors"), choice("jets")]), 1)
     const o = cleanObs((x) => (x.offer = { id: 1, expires: 99, choices: [choice("gun_velocity"), choice("plating"), choice("gun_mag")] }))

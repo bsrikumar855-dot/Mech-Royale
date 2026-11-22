@@ -14,6 +14,12 @@ export const ECONOMY = {
    * server's choice order.
    */
   upgradePriority: [
+    // Survival-first (experiment survival-upgrades): the top-16 showdown winners (BITS and Peaces, Ahmad Suliman) took
+    // plating / armor / nanites early and ended on 2,250-2,590 max HP. The DPS-first gains (+0.04/+0.08/+0.05) were
+    // measured on the old fixed-seed scorer, inside its noise band.
+    "plating", // +15% max HP (also the only thing that counts against zone damage)
+    "armor", // -8% damage taken
+    "nanites", // faster out-of-combat regen
     "gun_rate",
     "gun_damage",
     "laser_damage",
@@ -21,9 +27,6 @@ export const ECONOMY = {
     "lightning_efficiency",
     "lightning_range",
     "lightning_chain",
-    "armor", // -8% damage taken
-    "plating", // +15% max HP
-    "nanites", // faster out-of-combat regen
     "servos", // +8% speed
     "gun_mag",
     "reactor", // +30% energy regen (boost)
