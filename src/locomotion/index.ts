@@ -266,7 +266,7 @@ export class EvasiveLocomotion implements Locomotion {
 
     // anti-lead hop
     let jump = false
-    if ((sn.losCount >= 1 || sn.damagedForJump) && self.grounded && !ourLaserCharging && mode !== "mortar" && S.canJump(t)) {
+    if (L.antiLeadHops && (sn.losCount >= 1 || sn.damagedForJump) && self.grounded && !ourLaserCharging && mode !== "mortar" && S.canJump(t)) {
       jump = true
       S.didJump(t)
     }
