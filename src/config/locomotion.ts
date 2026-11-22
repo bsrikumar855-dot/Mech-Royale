@@ -154,6 +154,17 @@ export const LOCOMOTION = {
   steerAnglesDeg: [30, 60, 90, 120] as readonly number[],
   /** Once we steer around a wall to one side, prefer that side for this long (no oscillation). */
   wallCommitS: 1.5,
+  /**
+   * Unstick: the local wall feeler (steer.ts) only probes +-120 deg of the intended heading within feelerStepM and
+   * returns null ("boxed in") when every probe is blocked -- the exact bug class that gave locomotion v3 its +2.10
+   * (a concave pocket stalls the feeler, standing still is a free target), except steer() can hit it in ANY mode
+   * (retreat, approach, loot, patrol...), not just the zone runs that zone-nav-v2 already fixed. When steer() returns
+   * null, consult the same validated Dijkstra grid for a point `unstickLookaheadM` along the original intended
+   * heading, accepting any walkable cell within `unstickRadiusM` of it: a real route out of the pocket toward where
+   * we were already trying to go, instead of standing still until the pocket resolves itself.
+   */
+  unstickLookaheadM: 30,
+  unstickRadiusM: 6,
 } as const
 
 export const MAP = {

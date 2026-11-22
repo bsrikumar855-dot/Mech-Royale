@@ -260,7 +260,17 @@ export class EvasiveLocomotion implements Locomotion {
     this.lastMode = mode
     if (!dir) return { move: [0, 0], boost: false, jump }
     const mag = clamp(Math.hypot(dir[0], dir[1]), 0, 1)
-    const steered = steer(map, world, S, [dir[0] / mag, dir[1] / mag])
+    const unit: Vec2 = [dir[0] / mag, dir[1] / mag]
+    let steered = steer(map, world, S, unit)
+    // Unstick: the local feeler is boxed in. Ask the Dijkstra grid for a real route toward where we were already
+    // heading, instead of standing still (see LOCOMOTION.unstickLookaheadM).
+    if (!steered && nav) {
+      const uf = nav.field(px + unit[0] * L.unstickLookaheadM, py + unit[1] * L.unstickLookaheadM, L.unstickRadiusM)
+      if (uf) {
+        nav.pump(true)
+        steered = nav.direction(uf, px, py, self.pos[2])
+      }
+    }
     if (!steered) return { move: [0, 0], boost: false, jump }
     return { move: [steered[0] * mag, steered[1] * mag], boost, jump }
   }

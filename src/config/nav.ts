@@ -24,8 +24,8 @@ export const NAV = {
   popsPerTick: 1500,
   /** Same, while the mech is outside the zone (emergency: finish the field fast). */
   popsPerTickUrgent: 4000,
-  /** Fields kept at once (current + next destination). */
-  maxFields: 3,
+  /** Fields kept at once (current + next destination + the locomotion unstick fallback). */
+  maxFields: 4,
   /** Use the path length instead of the straight distance when deciding to start the zone run (ablation switch). */
   pathUrgency: false,
 } as const
