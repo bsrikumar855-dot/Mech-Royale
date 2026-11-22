@@ -40,7 +40,7 @@ export const COMBAT = {
   rearArcBonus: 0.1,
 
   // ---- regen hold-fire discipline (dealing damage resets the 5 s out-of-combat regen timer). Strict: never in a 1v1 brawl.
-  regenHoldHpFrac: 0.35,
+  regenHoldHpFrac: 0.25,
   /** Hold fire only on targets farther than this that we cannot finish (hp > killableHp). */
   regenHoldDistM: 75,
 
