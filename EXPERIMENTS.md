@@ -89,3 +89,27 @@ gun+laser 21%, gun+lightning 16%.
 | 1b laser-cooldown punish (exp/laser-punish @ d996947) | 1a+1f | +0.04 +- 0.10 | +0.11 +- 0.10 | Reject | below +0.15 on both |
 | 1c rear-arc-safe strafe (exp/rear-arc @ b9d69e9) | 1a+1f+1g | +0.01 +- 0.04 | -0.09 +- 0.06 | Reject | rear% already 8% in the sim |
 | **Stack 1a+1f+1g (main @ 8cc0907)** | c9aebde | **+0.75 +- 0.25** | **+0.86 +- 0.21** | stack candidate | local 2.84 / 2.78 |
+| Laser pickup reach 80/90 -> 120/130 m (exp/laser-reach-120) | main | -0.17 +- 0.09 | +0.06 +- 0.06 | Reject | |
+| woundedHpFrac 0.42 -> 0.50 (exp/wounded-050) | main | -0.08 +- 0.10 | -0.04 +- 0.11 | Reject | |
+| lightningKiteExtraM 6 -> 12 (exp/kite-12) | main | -0.02 +- 0.07 | +0.03 +- 0.07 | Reject | |
+| 1b target-cost bonus only (exp/laser-punish-cost) | main | -0.15 +- 0.12 | 0.00 +- 0.10 | Reject | |
+| 1d late caution (exp/late-caution) | main | 0.00 +- 0.00 | 0.00 +- 0.00 | Not measurable | no sim match lives to 265 s |
+
+FFA (sim, 8 cand + 8 base seats; A + B means sum to 15, so SE(delta) = 2 x SE(A)):
+
+| Variant | Base | n | FFA delta | Practice delta (1000 / 5000) | Decision |
+| --- | --- | --- | --- | --- | --- |
+| FFA v1 (exp/ffa @ c130c3d; silence no-op in the first run) | main | 64 + 128 | +0.40, +0.45 (pooled about +0.43 +- 0.24) | 0.00 / 0.00 | **FFA frozen at v1** |
+| FFA v2 = v1 + endgame rule (a909710) | main | 128 | +0.34 +- 0.28 | - | not merged |
+
+### Board result and correction (Sun 22 Nov, 14:15 IST)
+
+**a6e8147 (1a + 1f + 1g stack) scored 4.10 on the board vs 4.31 for c9aebde; the sim predicted about +0.8.** The sim's house
+bots are another team's competitive bot, not the real house AI (that is also why it scores us about 2.3 low), so **the sim
+is NOT trusted for practice deltas.** Our five builders-4 scores of near-identical bots (4.07, 4.07, 4.22, 4.31, 4.10) spread
+about +-0.1, so one submission resolves about 0.3: **the board is the practice A/B instrument again.** The sim is used only
+for FFA A/Bs and for bug forensics (behaviour that is wrong against any opponent).
+
+Board keep rule: a probe must beat 4.31 by >= 0.3 to become best-known-good; 4.0-4.6 is inconclusive. Probes are ONE change
+off c9aebde: P1 = 1a only, P2 = 1f only, P3 = FFA v1 only (detector + policy; checks real practice neutrality and gives a
+scored build that can be picked for the final). FFA is frozen at v1 unless the sim shows >= +0.3 over v1 at n >= 128.
