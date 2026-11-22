@@ -125,7 +125,7 @@ export function manoeuvreDamage(b: Body, bullets: readonly Bullet[], cx: number,
  * The best manoeuvre for `wanted` (Locomotion's heading, null = it wanted to stand still). Returns null when the wanted
  * move is already predicted safe (no change), or when there are no threatening bullets.
  */
-export function planEvasion(world: WorldModel, map: MapQuery | null, wanted: Vec2 | null, wantedBoost: boolean, bullets: readonly Bullet[]): Manoeuvre | null {
+export function planEvasion(world: WorldModel, map: MapQuery | null, wanted: Vec2 | null, wantedBoost: boolean, bullets: readonly Bullet[], wantedSpeedFrac = 1): Manoeuvre | null {
   if (bullets.length === 0) return null
   const self = world.self
   const b: Body = {
@@ -164,14 +164,14 @@ export function planEvasion(world: WorldModel, map: MapQuery | null, wanted: Vec
     }
     return Infinity
   }
-  const evalMove = (dir: Vec2 | null, boost: boolean, jump: boolean): Manoeuvre => {
-    const speed = boost ? b.boostSpeed : b.walk
+  const evalMove = (dir: Vec2 | null, boost: boolean, jump: boolean, frac = 1): Manoeuvre => {
+    const speed = (boost ? b.boostSpeed : b.walk) * frac
     const cx = dir ? dir[0] * speed : 0
     const cy = dir ? dir[1] * speed : 0
     return { dir, boost, jump, damage: manoeuvreDamage(b, bullets, cx, cy, jump, horizon, wallClock(dir, speed, jump)) }
   }
 
-  const wantedMove = evalMove(wanted, wantedBoost && b.energy > 1, false)
+  const wantedMove = evalMove(wanted, wantedBoost && b.energy > 1, false, wantedSpeedFrac)
   if (wantedMove.damage <= 0) return null
 
   const canBoost = b.energy >= L.evadeBoostMinEnergy

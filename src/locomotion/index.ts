@@ -334,10 +334,20 @@ export class EvasiveLocomotion implements Locomotion {
       S.didJump(t)
     }
 
+    // stop-go strafe: slow phases inside each strafe leg (only plain strafe while under fire)
+    let speedFrac = 1
+    if (L.strafeStopGo && mode === "strafe" && underFire && dir && t >= S.lastFlipT) {
+      if ((t - S.lastFlipT) % (L.stopGoGoS + L.stopGoSlowS) >= L.stopGoGoS) speedFrac = L.stopGoSlowFrac
+      if (speedFrac < 1) {
+        const u = norm(dir)
+        if (u) dir = [u[0] * speedFrac, u[1] * speedFrac]
+      }
+    }
+
     // predictive bullet evasion: replace the move only when the wanted one is predicted to be hit (never in a mortar escape)
     if (L.evadeEnabled && mode !== "mortar") {
       const wanted = dir ? norm(dir) : null
-      const plan = planEvasion(world, map, wanted, boost, threateningBullets(world))
+      const plan = planEvasion(world, map, wanted, boost, threateningBullets(world), speedFrac)
       if (plan) {
         mode = "dodge"
         dir = plan.dir

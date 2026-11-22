@@ -25,6 +25,7 @@ export class LocoState {
 
   strafeSign: 1 | -1 = 1
   nextFlipT = Number.NEGATIVE_INFINITY
+  lastFlipT = Number.NEGATIVE_INFINITY
   flips = 0
 
   lastJumpT = Number.NEGATIVE_INFINITY
@@ -55,6 +56,7 @@ export class LocoState {
     this.lastTick = null
     this.lastPos = null
     this.strafeSign = 1
+    this.lastFlipT = Number.NEGATIVE_INFINITY
     this.nextFlipT = Number.NEGATIVE_INFINITY
     this.flips = 0
     this.lastJumpT = Number.NEGATIVE_INFINITY
@@ -102,6 +104,7 @@ export class LocoState {
   /** Reverse now (timer, blocked side) and start a fresh period. */
   flipStrafe(t: number): void {
     this.strafeSign = this.strafeSign === 1 ? -1 : 1
+    this.lastFlipT = t
     this.flips++
     this.nextFlipT = t + this.flipPeriod()
   }

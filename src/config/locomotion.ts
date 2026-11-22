@@ -70,6 +70,16 @@ export const LOCOMOTION = {
   /** Any move whose 4 m lookahead leaves the safe rim is bent back inward. */
   rimLookaheadM: 4,
 
+  /**
+   * Stop-go strafe (experiment "dodge-move"): under fire in plain strafe mode, each leg between reversals runs at full
+   * walk for stopGoGoS, then at stopGoSlowFrac of it for stopGoSlowS, repeating. Our velocity keeps changing (a linear
+   * lead misses) without the in-place jitter of faster reversals (P8). The dodge planner judges the slowed move.
+   */
+  strafeStopGo: false as boolean,
+  stopGoGoS: 0.45,
+  stopGoSlowS: 0.3,
+  stopGoSlowFrac: 0.15,
+
   // ---- predictive bullet evasion (src/locomotion/evade.ts, experiment "evade-v2": evade on top of hops off)
   /** Master switch (false = the 286d48c behaviour exactly). */
   evadeEnabled: true,
