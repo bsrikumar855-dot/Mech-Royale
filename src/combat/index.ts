@@ -253,20 +253,21 @@ export class RuleCombat implements Combat {
     const mechHasLos = mechs.some((c) => c.los)
     for (const e of obs.events ?? []) if (e.type === "damaged" && typeof e.by === "number" && e.by < 100) this.attackers.set(e.by, world.t)
     // only-hunters: never shoot a house bot that is not after us (damaging it recruits it into the hunt)
-    const isHunter = (c: Cand): boolean => {
-      if (!COMBAT.onlyHunters || !c.a) return true
+    const hunting = (id: number, pos: Vec3, vel: Vec3, dist: number, charging: boolean, hp: number | undefined, maxHpIn: number | undefined): boolean => {
+      if (!COMBAT.onlyHunters) return true
       const t = world.t
-      if (t - (this.attackers.get(c.id) ?? Number.NEGATIVE_INFINITY) <= COMBAT.hunterRecentS) return true
-      if (this.lastLosTarget && this.lastLosTarget.id === c.id && t - this.lastLosTarget.t <= COMBAT.hunterStickyS) return true
-      if (c.dist <= COMBAT.hunterCloseM) return true
-      if (c.a.charging) return true
-      const maxHp = c.a.max_hp ?? fullHpOf()
-      if (c.hp !== undefined && maxHp > 0 && c.hp / maxHp < COMBAT.hunterLowHpFrac) return true
-      const dx = self.pos[0] - c.a.pos[0]
-      const dy = self.pos[1] - c.a.pos[1]
+      if (t - (this.attackers.get(id) ?? Number.NEGATIVE_INFINITY) <= COMBAT.hunterRecentS) return true
+      if (this.lastLosTarget && this.lastLosTarget.id === id && t - this.lastLosTarget.t <= COMBAT.hunterStickyS) return true
+      if (dist <= COMBAT.hunterCloseM) return true
+      if (charging) return true
+      const maxHp = maxHpIn ?? fullHpOf()
+      if (hp !== undefined && maxHp > 0 && hp / maxHp < COMBAT.hunterLowHpFrac) return true
+      const dx = self.pos[0] - pos[0]
+      const dy = self.pos[1] - pos[1]
       const d = Math.max(1, Math.hypot(dx, dy))
-      return (c.a.vel[0] * dx + c.a.vel[1] * dy) / d > COMBAT.hunterClosingMps
+      return (vel[0] * dx + vel[1] * dy) / d > COMBAT.hunterClosingMps
     }
+    const isHunter = (c: Cand): boolean => !c.a || hunting(c.id, c.a.pos, c.a.vel, c.dist, c.a.charging === true, c.hp, c.a.max_hp)
     let pool = mechs.filter((c) => c.los && c.dist <= engageRange && isHunter(c))
     // v14: below npcFarmMinHpFrac a drone is shot only in self-defence (it damaged us within npcSelfDefenseS: its hits
     // reset the regen timer anyway); otherwise we hold fire so the 5 s regen timer can run out.
@@ -341,7 +342,11 @@ export class RuleCombat implements Combat {
         self.in_zone &&
         world
           .enemies()
-          .some((e) => world.t - e.lastListedT <= COMBAT.laserPrechargeMemoryS && Math.hypot(e.pos[0] - muzzle[0], e.pos[1] - muzzle[1]) <= laserRange && Math.hypot(e.pos[0] - muzzle[0], e.pos[1] - muzzle[1]) > COMBAT.laserMinStartDistM)
+          .some((e) => {
+            const d = Math.hypot(e.pos[0] - muzzle[0], e.pos[1] - muzzle[1])
+            // stack: only pre-charge for a mech that is hunting us (only-hunters would not shoot a bystander anyway)
+            return world.t - e.lastListedT <= COMBAT.laserPrechargeMemoryS && d <= laserRange && d > COMBAT.laserMinStartDistM && hunting(e.id, e.pos, e.vel, d, e.charging, e.hp, e.maxHp)
+          })
       fire[lzSlot as 0 | 1] = laserTrigger({ world, map, laser, muzzle, target: laserTarget, canStart: laserCanStart, losLostFor: world.t - this.laserSeenT, precharge })
     }
 
