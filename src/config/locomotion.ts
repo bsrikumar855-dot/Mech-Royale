@@ -71,6 +71,8 @@ export const LOCOMOTION = {
   rimLookaheadM: 4,
 
   // ---- hops
+  /** 1f: anti-lead hops under fire. Airborne we accelerate at air_accel (12) not ground_accel (58.5): no strafe/dodge. */
+  antiLeadHops: false as boolean,
   jumpMinS: 1.8,
   jumpMaxS: 2.4,
   jumpDamageWindowS: 2,
