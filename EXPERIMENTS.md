@@ -127,3 +127,19 @@ scored build that can be picked for the final). FFA is frozen at v1 unless the s
 | Offers / latency / fallbacks | 86 offers, 0 unanswered; 0 missing answers | fine |
 
 Board probes (each ONE change off c9aebde): P1 3ba914d (1a), P2 286d48c (1f), P3 6b3c3a7 (FFA v1), P4 fa60a9a (gun_mag first), P5 11e07d6 (stuck escape).
+
+### Board results, Sun 22 Nov afternoon (builders-4)
+
+| Commit | Code | Board | Read against the c9aebde family (4.07-4.31, mean ~4.2) |
+| --- | --- | --- | --- |
+| a6e8147 | stack 1a + 1f + 1g | 4.10 | flat |
+| 07b4cf8 | SAME code as a6e8147 (docs-only commit on top) | 4.27 | second draw of one bot: two draws differ by 0.17, so per-submission noise is about +-0.1. Never submit a docs-only commit again. |
+| **286d48c (P2)** | c9aebde + 1f hops off only | **4.53** | **about +0.3: new best-known-good** (tag moved from c9aebde) |
+
+Implication: the 1a + 1f + 1g stack averaged 4.19 over two draws while 1f alone scored 4.53, so 1a (anti-lightning) and/or
+1g (reload 1.1 s) likely cost about 0.3 on the real server. Both are left out of every future build. Everything is rebased
+onto 286d48c from here on.
+
+Notes on the forensic table: the airborne-damage stat is confounded (hops fire exactly when we are under fire), so P2's board
+score decided it, not the sim correlation. P4 (gun_mag first) re-tests exp/gun-mag, which regressed under builders-3.
+Read rule for probes: >= 4.5 likely gain, 3.9-4.5 flat, < 3.9 likely harm.
