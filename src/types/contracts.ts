@@ -49,6 +49,8 @@ export interface LocomotionOutput {
   move: Vec2
   boost: boolean
   jump: boolean
+  /** P6: torso yaw to look along when Combat has no target and no threat bearing (opening sweep, arming walk) */
+  scanYaw?: number
 }
 
 export interface TickContext {

@@ -202,6 +202,7 @@ export const LOCOMOTION = {
    * target we were walking to for stuckLootBanS.
    */
   stuckEscape: true as boolean,
+  // (P5 constants follow)
   stuckCmdMinWalkFrac: 0.5,
   stuckSpeedRatio: 0.25,
   stuckDecisions: 8,
@@ -210,6 +211,28 @@ export const LOCOMOTION = {
   stuckJetMinEnergy: 20,
   stuckLootBanS: 20,
   stuckLootBanM: 4,
+
+  /**
+   * P6 arm early: only 37/96 sim matches ever held a laser or lightning (slot empty 29% of the time after 60 s).
+   * Opening: for openingSweepS, with no target and no threat, keep the torso turning (commanded yaw sweepLeadRad
+   * ahead of the actual yaw) so the 120 deg vision wedge sees all around. Every laser / lightning pickup seen is
+   * remembered until its spot is visible again without it. Until we hold a laser or lightning, and while not under
+   * fire, walk (zone-nav path once the zone field is built) to the best remembered one within armRangeM inside the
+   * safe zone, looking along the way. Under fire: the usual evasion.
+   */
+  armEarly: true as boolean,
+  openingSweepS: 2,
+  sweepLeadRad: 0.8,
+  armRangeM: 160,
+  armBase: { laser: 20, lightning: 18 } as Readonly<Record<string, number>>,
+  armHalfValueM: 60,
+  /** walk straight when this close; else follow a nav field toward the pickup (destination circle radius) */
+  armStraightM: 12,
+  armFieldRadiusM: 6,
+  /** forget a remembered pickup not seen for this long */
+  armMemoryS: 120,
+  /** a remembered pickup counts as checked (gone) when it is not listed while within this fraction of vision ranges */
+  armRecheckFrac: 0.9,
 } as const
 
 export const MAP = {

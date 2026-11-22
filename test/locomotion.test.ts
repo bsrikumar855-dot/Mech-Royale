@@ -9,7 +9,7 @@ import { NO_DEADLINE } from "../src/runtime/deadline.ts"
 import type { Observation, WeaponObs } from "../src/types/mechfight.ts"
 import type { MapQuery } from "../src/world/map.ts"
 import { WorldModel } from "../src/world/world.ts"
-import { cleanObs, enemy, fixtureHello, fixtureObs, HAS_ARENA, realMap, syntheticMap } from "./helpers.ts"
+import { cleanObs, enemy, fixtureHello, fixtureObs, HAS_ARENA, lightningWeapon, realMap, syntheticMap } from "./helpers.ts"
 
 const hello = fixtureHello()
 const mag = (v: readonly number[]): number => Math.hypot(v[0]!, v[1]!)
@@ -245,9 +245,10 @@ describe("active loot and supply drops", () => {
     o.self.cubes = 10
     o.self.weapons = [o.self.weapons[0] ?? null, laser()]
   }
-  test("walks to a laser up to 90 m away while the snowball gate is open (not 95 m)", () => {
-    assert.equal(once((o) => (o.pickups = [pick("laser", 88)])).mode, "loot")
-    assert.notEqual(once((o) => (o.pickups = [pick("laser", 95)])).mode, "loot")
+  test("P6: unarmed, a laser is walked to in arm mode up to armRangeM (was 90 m loot), not beyond", () => {
+    assert.equal(once((o) => (o.pickups = [pick("laser", 95)])).mode, "arm")
+    assert.equal(once((o) => (o.pickups = [pick("laser", L.armRangeM - 5)])).mode, "arm")
+    assert.notEqual(once((o) => (o.pickups = [pick("laser", L.armRangeM + 5)])).mode, "arm")
   })
   test("gate closed by an enemy tracked within 50 m (no shot line): the laser reach is back to 80 m", () => {
     const map = syntheticMap()
@@ -256,12 +257,13 @@ describe("active loot and supply drops", () => {
     const at = (dx: number) => new Runner(map).step((o) => { o.self.pos = [...me]; o.mechs = [hidden]; o.pickups = [{ id: 8001, kind: "laser", pos: [me[0] - dx, me[1], -2 - 0.1 * dx] }] })
     const r = at(85)
     assert.equal(r.sense.losCount, 0, "precondition: no shot line")
-    assert.notEqual(r.mode, "loot", "85 m: beyond the closed-gate 80 m")
-    assert.equal(at(75).mode, "loot")
+    assert.equal(r.mode, "arm", "P6: unarmed, arming reaches past the closed-gate 80 m")
+    assert.equal(at(75).mode, "arm")
   })
   test("lightning up to 55 m only with an empty slot and no laser; cubes up to 65 m (55 m once snowballed)", () => {
-    assert.equal(once((o) => (o.pickups = [pick("lightning", 50)])).mode, "loot")
+    assert.equal(once((o) => (o.pickups = [pick("lightning", 50)])).mode, "arm", "P6: unarmed -> arm mode")
     assert.notEqual(once((o) => { o.self.weapons = [o.self.weapons[0] ?? null, laser()]; o.pickups = [pick("lightning", 50)] }).mode, "loot")
+    assert.notEqual(once((o) => { o.self.weapons = [o.self.weapons[0] ?? null, laser()]; o.pickups = [pick("lightning", 50)] }).mode, "arm")
     assert.equal(once((o) => (o.cubes = [{ id: 5001, pos: [60, 0, 0] }])).mode, "loot")
     assert.notEqual(once((o) => (o.cubes = [{ id: 5001, pos: [68, 0, 0] }])).mode, "loot")
     assert.equal(once((o) => { snowballed(o); o.cubes = [{ id: 5001, pos: [50, 0, 0] }] }).mode, "loot")
@@ -449,7 +451,7 @@ describe("v5: crate and drone hunting (snowball gate)", () => {
   })
   test("v14: at 75% HP free loot is still scooped (no damage dealt): a cube and a weapon pickup", () => {
     assert.equal(once((o) => { fresh(o); o.self.hp = 0.75 * o.self.max_hp; o.cubes = [{ id: 5001, pos: [30, 0, 0] }]; o.crates = [crate(40)] }).mode, "loot")
-    assert.equal(once((o) => { fresh(o); o.self.hp = 0.75 * o.self.max_hp; o.pickups = [{ id: 8001, kind: "laser", pos: [50, 0, 0] }] }).mode, "loot")
+    assert.equal(once((o) => { fresh(o); o.self.hp = 0.75 * o.self.max_hp; o.pickups = [{ id: 8001, kind: "laser", pos: [50, 0, 0] }] }).mode, "arm")
   })
   test("10 cubes + a laser: ignores distant crates and drones and patrols", () => {
     const done = (o: Observation): void => {
@@ -479,7 +481,7 @@ describe("v5: crate and drone hunting (snowball gate)", () => {
   })
   test("a laser pickup at 80 m beats a crate at 40 m when we hold no laser", () => {
     const r = once((o) => { fresh(o); o.crates = [crate(0, 40)]; o.pickups = [{ id: 8001, kind: "laser", pos: [80, 0, 0] }] })
-    assert.equal(r.mode, "loot")
+    assert.equal(r.mode, "arm")
     assert.ok(r.out.move[0] > 0.99, `toward the laser (east), not the crate (north): ${r.out.move}`)
   })
   test("a free cube nearby is grabbed before walking to a drone", () => {
@@ -587,5 +589,39 @@ describe("P5: physical stuck escape (server velocity, not our map model)", () =>
     }
     assert.equal(slow(0.33), 0)
     assert.equal(slow(0.2), 1)
+  })
+})
+
+describe("P6: arm early", () => {
+  const lp = (x: number, y = 0, kind: "laser" | "lightning" = "laser") => ({ id: 8001, kind, pos: [x, y, 0] as [number, number, number] })
+  test("opening sweep: in the first openingSweepS with nothing around, the scan yaw leads the torso", () => {
+    const r = new Runner()
+    r.t = 0.5
+    const x = r.step((o) => (o.self.aim = [1, 0]))
+    assert.ok(Math.abs(x.out.scanYaw! - (1 + L.sweepLeadRad)) < 1e-9)
+    const later = once()
+    assert.equal(later.out.scanYaw, undefined, "no sweep after the opening")
+  })
+  test("a laser seen once stays the arming target after it drops out of the listing (spot not in view)", () => {
+    const r = new Runner()
+    assert.equal(r.step((o) => (o.pickups = [lp(-120)])).mode, "arm")
+    const x = r.step((o) => { o.pickups = []; o.self.aim = [0, 0] }) // facing east, the pickup is 120 m west: not in view
+    assert.equal(x.mode, "arm")
+    assert.ok(x.out.move[0] < -0.9, `heads west: ${x.out.move}`)
+    assert.ok(Math.abs(Math.abs(x.out.scanYaw!) - Math.PI) < 1e-6, "looks along the way")
+  })
+  test("forgotten once its spot is in view and it is not listed (taken by someone)", () => {
+    const r = new Runner()
+    r.step((o) => (o.pickups = [lp(120)]))
+    const x = r.step((o) => { o.pickups = []; o.self.aim = [0, 0] }) // facing it, 120 m, no map -> line of sight
+    assert.notEqual(x.mode, "arm")
+    assert.equal(x.state.pickupMem.size, 0)
+  })
+  test("under fire the usual evasion wins; already holding lightning -> no arming", () => {
+    assert.notEqual(once((o) => { o.pickups = [lp(60)]; o.mechs = [enemy(5, [70, 0, 0])] }).mode, "arm")
+    assert.notEqual(once((o) => { o.pickups = [lp(60)]; o.self.weapons = [o.self.weapons[0] ?? null, lightningWeapon()] }).mode, "arm")
+  })
+  test("outside the safe zone the target is skipped", () => {
+    assert.notEqual(once((o) => { o.pickups = [lp(140)]; o.zone = { ...o.zone, radius: 100, next_radius: 100 } }).mode, "arm")
   })
 })
