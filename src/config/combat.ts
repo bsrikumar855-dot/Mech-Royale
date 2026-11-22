@@ -57,6 +57,13 @@ export const COMBAT = {
   laserLosLossS: 0.3,
   /** Do not START a charge with an enemy mech this close (half speed in its face)... */
   laserMinStartDistM: 18,
+  /**
+   * Pre-charge (experiment "laser-precharge"): with no shot line but an enemy mech seen within this many seconds and
+   * inside laser range, start charging and HOLD the charge (up to charge + hold_s - safety) so the beam fires the
+   * instant it re-appears, instead of starting a 0.75 s charge only after it is back in sight.
+   */
+  laserPrecharge: true,
+  laserPrechargeMemoryS: 2,
   /** ...unless the charge is already this far along. */
   laserCommitChargeS: 0.3,
 

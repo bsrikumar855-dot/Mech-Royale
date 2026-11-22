@@ -165,13 +165,17 @@ export function laserTrigger(args: {
   canStart: boolean
   /** seconds since the charge last had a line-of-sight target (0 while it has one) */
   losLostFor: number
+  /** pre-charge: an enemy was seen recently, out of sight now: start / keep a held charge */
+  precharge?: boolean
 }): boolean {
   const { world, map, laser, muzzle, target, canStart, losLostFor } = args
+  const precharge = args.precharge === true
   const charge = laser.charge ?? 0
-  if (charge <= 0) return canStart && target !== null
-  // Target out of sight: keep the charge briefly (it may step back out), then release so we stop crawling at half speed.
-  if (!target) return losLostFor <= COMBAT.laserLosLossS
   const limit = stat(laser, "charge", 0) + stat(laser, "hold_s", 0) - COMBAT.laserHoldSafetyS
+  if (charge <= 0) return (canStart && target !== null) || (precharge && target === null)
+  // Target out of sight: pre-charging holds the charge up to the auto-fire limit; otherwise keep it briefly (it may step
+  // back out), then release so we stop crawling at half speed.
+  if (!target) return precharge ? charge < limit : losLostFor <= COMBAT.laserLosLossS
   if (charge >= limit) return false
   const aligned = aimErrorRad(world.self.aim, aimAt(muzzle, target.com)) <= Math.atan2(target.radius * COMBAT.laserReleaseAimFrac, Math.max(target.dist, 1e-6))
   if (!aligned) return true
@@ -325,7 +329,16 @@ export class RuleCombat implements Combat {
     if (laser && lzSlot >= 0) {
       const laserTarget = target && target.kind === "mech" ? target : null
       if (laserTarget) this.laserSeenT = world.t
-      fire[lzSlot as 0 | 1] = laserTrigger({ world, map, laser, muzzle, target: laserTarget, canStart: laserCanStart, losLostFor: world.t - this.laserSeenT })
+      // pre-charge: no shot line now, but an enemy mech seen within laserPrechargeMemoryS, in laser range, not too close
+      const precharge =
+        COMBAT.laserPrecharge &&
+        !laserTarget &&
+        (laser.cooldown ?? 0) <= 0 &&
+        self.in_zone &&
+        world
+          .enemies()
+          .some((e) => world.t - e.lastListedT <= COMBAT.laserPrechargeMemoryS && Math.hypot(e.pos[0] - muzzle[0], e.pos[1] - muzzle[1]) <= laserRange && Math.hypot(e.pos[0] - muzzle[0], e.pos[1] - muzzle[1]) > COMBAT.laserMinStartDistM)
+      fire[lzSlot as 0 | 1] = laserTrigger({ world, map, laser, muzzle, target: laserTarget, canStart: laserCanStart, losLostFor: world.t - this.laserSeenT, precharge })
     }
 
     if (lightning && ltSlot >= 0 && !regenHold && self.energy > COMBAT.lightningMinEnergy && self.energy >= stat(lightning, "energy")) {
