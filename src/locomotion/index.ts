@@ -12,7 +12,8 @@
  *  7. idle                        -> wounded: hold still for regen; healthy: patrol the next circle's mid band
  * Every heading goes through a wall feeler with side commitment. All numbers: src/config/locomotion.ts.
  */
-import { LOCOMOTION as L, NAV } from "../config/index.ts"
+import { COMBAT, LOCOMOTION as L, NAV } from "../config/index.ts"
+import { burstDamage } from "../combat/index.ts"
 import type { Locomotion, LocomotionOutput, LootTarget, TickContext } from "../types/contracts.ts"
 import type { Vec2, Vec3 } from "../types/mechfight.ts"
 import { angleDiff, clamp, dist2d, unit2, yawTo } from "../world/geom.ts"
@@ -150,7 +151,8 @@ export class EvasiveLocomotion implements Locomotion {
     const nextC: Vec2 = [z.next_center[0], z.next_center[1]]
     const safeR = cur.radius * L.safeRadiusFrac
     const inSafe = (x: number, y: number): boolean => dist2d(x, y, cur.center[0], cur.center[1]) <= safeR
-    let distNextSafe = Math.max(0, dist2d(px, py, nextC[0], nextC[1]) - z.next_radius * L.nextSafeFrac)
+    const late = t >= L.lateCautionT
+    let distNextSafe = Math.max(0, dist2d(px, py, nextC[0], nextC[1]) - Math.max(0, z.next_radius * L.nextSafeFrac - (late ? L.lateNextMarginM : 0)))
     const walk = Math.max(1, world.selfStat("walk_speed", 1))
     // Path-planned zone runs: a path-distance field toward the NEXT circle's centre (known all phase long), built a few
     // thousand heap pops per tick. Straight-line travel time under-estimates a detour around buildings and the local
@@ -229,7 +231,9 @@ export class EvasiveLocomotion implements Locomotion {
       // v5 post-kill scoop: no shot line on us -> cubes up to 25 m; one shooter -> a cube within 14 m above 45% HP
       const scoopR = sn.losCount === 0 ? L.scoopNoLosM : sn.losCount === 1 && hpFrac > L.scoopOneLosMinHpFrac ? L.scoopOneLosM : 0
       const loot = close18 ?? (scoopR > 0 ? this.pickLoot(world, inSafe, scoopR, { cubesOnly: true }) : null)
-      if (sn.losCount >= 2 || hpFrac < L.woundedHpFrac) {
+      const primary = sn.enemies.find((e) => e.los) ?? sn.enemies[0]
+      const lateRetreat = late && !(primary && primary.hp <= burstDamage(self, COMBAT.lateFinishWindowS))
+      if (sn.losCount >= 2 || hpFrac < L.woundedHpFrac || lateRetreat) {
         mode = "retreat"
         dir = norm(add(perp, towardThreat, L.retreatBlend))
       } else if (close) {
@@ -378,12 +382,15 @@ export class EvasiveLocomotion implements Locomotion {
     const self = world.self
     const [px, py] = self.pos
     const hunt = opts.hunt === true
+    const lateGame = world.t >= L.lateCautionT
     const held = self.weapons.flatMap((w) => (w ? [w.kind] : []))
     const emptySlot = self.weapons.some((w) => w === null)
     let best: LootPick | null = null
     const consider = (x: number, y: number, kind: string, range: number, ring?: number, target?: { com: Vec3; standoff: number }): void => {
       const d = dist2d(px, py, x, y)
       if (d > Math.min(range, maxDist) || !inSafe(x, y)) return
+      // B1: late game, no loot / farm detours except uncontested supply drops
+      if (lateGame && (kind !== "supply_drop" || world.enemies().some((e) => world.t - e.lastListedT <= world.rules.memoryS && dist2d(e.pos[0], e.pos[1], x, y) < L.lateDropClearM))) return
       for (const b of this.state.lootBans) if (dist2d(x, y, b.x, b.y) < L.stuckLootBanM) return
       const value = (L.lootBase[kind] ?? L.huntBase[kind] ?? 0) / (1 + d / L.lootHalfValueM)
       if (best && value <= best.value) return
@@ -457,6 +464,7 @@ export class EvasiveLocomotion implements Locomotion {
   /** P6: until we hold a laser or lightning (with a free slot), the best remembered one in range inside the safe zone. */
   private armTarget(world: WorldModel, inSafe: (x: number, y: number) => boolean): { x: number; y: number; kind: string; dist: number } | null {
     const self = world.self
+    if (world.t >= L.lateCautionT) return null // B1: no arming detours late
     if (!self.weapons.some((w) => w === null)) return null
     if (self.weapons.some((w) => w?.kind === "laser" || w?.kind === "lightning")) return null
     const [px, py] = self.pos

@@ -235,6 +235,16 @@ export const LOCOMOTION = {
   armMemoryS: 120,
   /** a remembered pickup counts as checked (gone) when it is not listed while within this fraction of vision ranges */
   armRecheckFrac: 0.9,
+
+  /**
+   * B1 late-game caution: from lateCautionT (every house bot hunts us) the under-fire branch retreats to break line of
+   * sight instead of approach / strafe / loot unless the primary threat is finishable (HP <= what we deal in
+   * COMBAT.lateFinishWindowS); no loot / farm / arming detours except uncontested supply drops (no tracked enemy within
+   * lateDropClearM); the shrink trigger keeps lateNextMarginM more margin inside the next circle.
+   */
+  lateCautionT: 240,
+  lateNextMarginM: 15,
+  lateDropClearM: 60,
 } as const
 
 export const MAP = {

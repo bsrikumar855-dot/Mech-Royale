@@ -19,6 +19,8 @@ export interface SensedEnemy {
   los: boolean
   charging: boolean
   lightning: boolean
+  /** absolute hp when the server shows it, else Infinity */
+  hp: number
   muzzle: Vec3
 }
 
@@ -71,6 +73,7 @@ export function sense(world: WorldModel, map: MapQuery | null, ourRadius: number
       los: false,
       charging: e.charging,
       lightning: e.weapons.includes("lightning"),
+      hp: typeof e.hp === "number" ? e.hp : Infinity,
       muzzle: [e.pos[0], e.pos[1], e.pos[2] + muzzleH] as Vec3,
     }))
     .sort((a, b) => Number(b.charging) - Number(a.charging) || a.dist - b.dist)

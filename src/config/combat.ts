@@ -38,6 +38,11 @@ export const COMBAT = {
   chargingThreatBonus: 0.4,
   /** We would hit its rear arc (x rear_mult). */
   rearArcBonus: 0.1,
+  /** B1: from LOCOMOTION.lateCautionT fire only at mechs that damaged us within lateAttackerMemoryS, or finishable ones */
+  lateFireDiscipline: true as boolean,
+  lateAttackerMemoryS: 3,
+  /** finishable = HP <= the damage our gun (and lightning) deals in this window */
+  lateFinishWindowS: 2,
 
   // ---- regen hold-fire discipline (dealing damage resets the 5 s out-of-combat regen timer). Strict: never in a 1v1 brawl.
   regenHoldHpFrac: 0.35,
