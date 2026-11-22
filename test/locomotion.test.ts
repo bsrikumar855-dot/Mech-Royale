@@ -30,16 +30,23 @@ class Runner {
   world = new WorldModel(hello)
   map: MapQuery | null
   t = 10
+  /** last commanded move: fed back as our velocity, like a server that lets us walk (the stuck detector reads it) */
+  lastMove: readonly number[] = [0, 0]
   constructor(map: MapQuery | null = null) {
     this.map = map
   }
   step(patch: (o: Observation) => void = () => {}, dt = 0.1) {
-    const o = scene(patch)
+    const walk = (hello.config.mech as Record<string, number>).walk_speed!
+    const o = scene((x) => {
+      x.self.vel = [this.lastMove[0]! * walk, this.lastMove[1]! * walk, 0]
+      patch(x)
+    })
     o.t = this.t
     o.tick = Math.round(this.t * 20)
     this.t += dt
     this.world.update(o)
     const out = this.loco.decide({ world: this.world, map: this.map, deadline: NO_DEADLINE }, [])
+    this.lastMove = out.move
     return { out, mode: this.loco.lastMode, sense: this.loco.lastSense!, state: this.loco.state }
   }
 }
@@ -505,5 +512,46 @@ describe("v5: snowball upgrade order", () => {
     const p = ECONOMY.upgradePriority
     assert.deepEqual([...p.slice(0, 7)].sort(), ["gun_damage", "gun_rate", "laser_charge", "laser_damage", "lightning_chain", "lightning_efficiency", "lightning_range"])
     assert.deepEqual([...p.slice(-3)].sort(), ["mortar_reload", "mortar_splash", "mortar_velocity"])
+  })
+})
+
+describe("P5: physical stuck escape (server velocity, not our map model)", () => {
+  /** patrol in a calm scene, but the server reports we are not moving at all */
+  const wedged = (r: Runner, extra: (o: Observation) => void = () => {}) => r.step((o) => { o.self.vel = [0, 0, 0]; extra(o) })
+  test(`commanding a move but not moving for ${L.stuckDecisions} decisions -> jump along a rotated heading`, () => {
+    const r = new Runner()
+    const first = wedged(r)
+    assert.ok(mag(first.out.move) > 0.5, "patrolling")
+    const before = first.out.move
+    let esc = first
+    for (let i = 0; i < L.stuckDecisions; i++) esc = wedged(r)
+    assert.equal(esc.out.jump, true, "jump to clear the ledge")
+    assert.ok(Math.abs(dot(esc.out.move, before)) < 0.2, `rotated ${L.stuckEscapeDeg[0]} deg: ${esc.out.move} vs ${before}`)
+    assert.equal(esc.state.escapes, 1)
+  })
+  test("moving at walk speed never triggers; neither does standing still on purpose", () => {
+    const r = new Runner()
+    for (let i = 0; i < 30; i++) assert.equal(r.step().state.escapes, 0)
+    const hold = new Runner()
+    for (let i = 0; i < 30; i++) assert.equal(wedged(hold, (o) => (o.self.hp = o.self.max_hp * 0.5)).state.escapes, 0, "wounded regen hold: no move commanded")
+  })
+  test("while airborne in the escape: jet (boost) to climb if energy allows; airborne ticks do not reset the streak", () => {
+    const r = new Runner()
+    for (let i = 0; i <= L.stuckDecisions; i++) wedged(r)
+    const air = wedged(r, (o) => (o.self.grounded = false))
+    assert.equal(air.out.boost, true)
+    assert.equal(air.out.jump, false)
+    const low = new Runner()
+    for (let i = 0; i <= L.stuckDecisions; i++) wedged(low)
+    assert.equal(wedged(low, (o) => { o.self.grounded = false; o.self.energy = L.stuckJetMinEnergy - 1 }).out.boost, false)
+  })
+  test("the loot target we were walking to when stuck is banned for a while", () => {
+    const r = new Runner()
+    const cube = (o: Observation) => (o.cubes = [{ id: 5001, pos: [30, 0, 0] }])
+    assert.equal(wedged(r, cube).mode, "loot")
+    for (let i = 0; i < L.stuckDecisions; i++) wedged(r, cube)
+    assert.equal(r.loco.state.lootBans.length, 1)
+    r.t += L.stuckEscapeS + 0.1
+    assert.notEqual(r.step(cube).mode, "loot", "banned")
   })
 })
