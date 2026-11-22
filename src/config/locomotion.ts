@@ -56,6 +56,17 @@ export const LOCOMOTION = {
   /** Strafe direction flips after a deterministic, varying period in [flipMinS, flipMaxS]. */
   flipMinS: 0.75,
   flipMaxS: 1.15,
+  /**
+   * P8 distance-timed reversals: under fire from a gun-holder at distance d, the A-D reversal period is the bullet
+   * flight time d / config.weapons.gun.speed times a random factor in [reversalFactorMin, reversalFactorMax], clamped
+   * to [reversalMinS, reversalMaxS] (instead of flipMinS..flipMaxS). Side choice (laser charger, walls, bullet snap)
+   * is unchanged.
+   */
+  reversalByFlight: true as boolean,
+  reversalFactorMin: 0.8,
+  reversalFactorMax: 1.2,
+  reversalMinS: 0.45,
+  reversalMaxS: 1.1,
   /** Flip at once if the current strafe side is blocked within this distance. */
   strafeBlockProbeM: 5,
   /** Range control: radial blend added to the perpendicular strafe (negative = away from the threat). */
