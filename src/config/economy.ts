@@ -14,8 +14,11 @@ export const ECONOMY = {
    * server's choice order.
    */
   upgradePriority: [
-    "gun_rate",
+    // Sustained gun DPS per first level (12-round mag, 0.24 s cooldown, 2.4 s reload): gun_mag +31% (+8 rounds and
+    // -20% reload), gun_damage +15%, gun_rate +7.6% (a faster cooldown also empties the magazine sooner).
+    "gun_mag",
     "gun_damage",
+    "gun_rate",
     "laser_damage",
     "laser_charge",
     "lightning_efficiency",
@@ -25,7 +28,6 @@ export const ECONOMY = {
     "plating", // +15% max HP
     "nanites", // faster out-of-combat regen
     "servos", // +8% speed
-    "gun_mag",
     "reactor", // +30% energy regen (boost)
     "capacitor", // +30 max energy
     "gyros", // turn rate: the slew gate depends on it
