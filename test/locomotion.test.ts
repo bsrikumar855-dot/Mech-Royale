@@ -111,10 +111,10 @@ describe("A-D strafing with range control", () => {
     assert.equal(once((o) => (o.mechs = [enemy(5, [48, 0, 0], { weapons: ["gun", "lightning"] })])).mode, "backpedal")
     assert.equal(once((o) => (o.mechs = [enemy(5, [48, 0, 0])])).mode, "strafe")
   })
-  test("strafe direction reverses every 0.75-1.15 s, not on a constant period", () => {
+  test("strafe direction reverses every 0.75-1.15 s, not on a constant period (no gun-holder: fixed rhythm)", () => {
     const r = new Runner()
     const signs: number[] = []
-    for (let i = 0; i < 60; i++) signs.push(Math.sign(r.step((o) => (o.mechs = [enemy(5, [60, 0, 0])])).out.move[1]))
+    for (let i = 0; i < 60; i++) signs.push(Math.sign(r.step((o) => (o.mechs = [enemy(5, [60, 0, 0], { weapons: [] })])).out.move[1]))
     const flipsAt = signs.flatMap((s, i) => (i > 0 && s !== signs[i - 1] ? [i] : []))
     assert.ok(flipsAt.length >= 4 && flipsAt.length <= 8, `${flipsAt.length} reversals in 6 s`)
     const gaps = flipsAt.slice(1).map((v, i) => v - flipsAt[i]!)
@@ -643,5 +643,31 @@ describe("P9: arm early and the stuck escape both yield to the predictive dodge 
     const x = r.step((o) => { o.self.vel = [0, 0, 0]; bullet(o) })
     assert.equal(x.mode, "dodge")
     assert.equal(x.out.jump, false, "the escape's jump is not applied during the dodge")
+  })
+})
+
+describe("P8: reversal period = bullet flight time to the gun-holder", () => {
+  const gaps = (x: number, n = 80): number[] => {
+    const r = new Runner()
+    const signs: number[] = []
+    for (let i = 0; i < n; i++) signs.push(Math.sign(r.step((o) => (o.mechs = [enemy(5, [x, 0, 0])])).out.move[1]))
+    const at = signs.flatMap((s, i) => (i > 0 && s !== signs[i - 1] ? [i] : []))
+    return at.slice(1).map((v, i) => v - at[i]!)
+  }
+  const gunSpeed = (hello.config.weapons.gun as Record<string, number>).speed!
+  test("close (60 m): flight time below the floor -> reversals every reversalMinS (~0.5 s)", () => {
+    const g = gaps(60)
+    assert.ok(g.length >= 8, `${g.length} gaps`)
+    for (const v of g) assert.ok(v >= Math.floor(L.reversalMinS * 10) && v <= Math.ceil(L.reversalMinS * 10) + 1, `gap ${v}`)
+  })
+  test("far (200 m): d / gun.speed x [0.8, 1.2], and it varies", () => {
+    const g = gaps(200)
+    const lo = Math.floor((200 / gunSpeed) * L.reversalFactorMin * 10)
+    const hi = Math.ceil((200 / gunSpeed) * L.reversalFactorMax * 10) + 1
+    for (const v of g) assert.ok(v >= lo && v <= hi, `gap ${v} not in ${lo}..${hi}`)
+    assert.ok(new Set(g).size > 1, "periods vary")
+  })
+  test("very far (400 m, still listed): clamped to reversalMaxS", () => {
+    for (const v of gaps(400)) assert.ok(v <= Math.ceil(L.reversalMaxS * 10) + 1, `gap ${v}`)
   })
 })

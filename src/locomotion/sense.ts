@@ -19,6 +19,8 @@ export interface SensedEnemy {
   los: boolean
   charging: boolean
   lightning: boolean
+  /** P8: carries a gun */
+  gun: boolean
   muzzle: Vec3
 }
 
@@ -29,6 +31,8 @@ export interface Sensed {
   bearing: number | null
   /** distance to the threat the bearing points at (Infinity if not a mech) */
   bearingDist: number
+  /** P8: the enemy the bearing points at carries a gun */
+  bearingGun: boolean
   damagedRecently: boolean
   /** damaged within the (shorter) hop window */
   damagedForJump: boolean
@@ -71,6 +75,7 @@ export function sense(world: WorldModel, map: MapQuery | null, ourRadius: number
       los: false,
       charging: e.charging,
       lightning: e.weapons.includes("lightning"),
+      gun: e.weapons.includes("gun"),
       muzzle: [e.pos[0], e.pos[1], e.pos[2] + muzzleH] as Vec3,
     }))
     .sort((a, b) => Number(b.charging) - Number(a.charging) || a.dist - b.dist)
@@ -95,10 +100,12 @@ export function sense(world: WorldModel, map: MapQuery | null, ourRadius: number
   // primary threat bearing: nearest LOS enemy > nearest tracked enemy > damage > sound > projectile
   let bearing: number | null = null
   let bearingDist = Infinity
+  let bearingGun = false
   const nearest = losEnemies[0] ?? enemies.slice().sort((a, b) => a.dist - b.dist)[0]
   if (nearest) {
     bearing = yawTo(px, py, nearest.x, nearest.y)
     bearingDist = nearest.dist
+    bearingGun = nearest.gun
   } else if (damagedRecently && lastDamage) bearing = lastDamage.bearing
   else if (heard) bearing = sounds[sounds.length - 1]!.bearing
   else if (projs[0]) bearing = yawTo(px, py, projs[0].pos[0], projs[0].pos[1])
@@ -163,6 +170,7 @@ export function sense(world: WorldModel, map: MapQuery | null, ourRadius: number
     losCount,
     bearing,
     bearingDist,
+    bearingGun,
     damagedRecently,
     damagedForJump,
     heard,

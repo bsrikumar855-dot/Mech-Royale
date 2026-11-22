@@ -171,6 +171,9 @@ export class EvasiveLocomotion implements Locomotion {
 
     // ---- strafe side: timer, bullet snap, laser dodge, blocked side
     const underFire = sn.losCount > 0 || sn.damagedRecently || sn.projectileNear
+    const gunSpeed = cfg(world.config.weapons.gun, "speed", 0)
+    S.flightS =
+      L.reversalByFlight && underFire && sn.bearingGun && Number.isFinite(sn.bearingDist) && gunSpeed > 0 ? sn.bearingDist / gunSpeed : null
     if (sn.active) S.tickStrafe(t)
     const b = sn.bearing
     const side = (): Vec2 | null => (b === null ? null : [-Math.sin(b) * S.strafeSign, Math.cos(b) * S.strafeSign])
