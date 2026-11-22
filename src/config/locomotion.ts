@@ -42,11 +42,11 @@ export const LOBBY = {
   /** ... and it does not end within this of us */
   farBeamEndM: 25,
   /** FFA when foreignDeaths >= earlyForeignDeaths before earlyBeforeS ... */
-  earlyForeignDeaths: 2,
+  earlyForeignDeaths: 3,
   earlyBeforeS: 150,
   /** ... or foreignDeaths >= witnessedForeignDeaths with farBeams >= witnessedFarBeams */
   witnessedForeignDeaths: 1,
-  witnessedFarBeams: 2,
+  witnessedFarBeams: 3,
 } as const
 
 export const LOCOMOTION = {
