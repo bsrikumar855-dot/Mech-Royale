@@ -39,6 +39,19 @@ export const COMBAT = {
   /** We would hit its rear arc (x rear_mult). */
   rearArcBonus: 0.1,
 
+  // ---- 2b FFA policy (only while world.lobby === "ffa"): never open on a healthy, unengaged mech
+  ffaRestraint: true as boolean,
+  /** it damaged us within this window */
+  ffaAttackerMemoryS: 8,
+  /** low enough to finish (also any hp <= killableHp) */
+  ffaLowHpFrac: 0.35,
+  /** too close to ignore: it will fight us anyway */
+  ffaSelfDefenseM: 40,
+  /** "busy": its aim is off us by more than this and points within ffaBusyConeRad of another tracked mech */
+  ffaBusyAimRad: 0.6,
+  ffaBusyConeRad: 0.25,
+  ffaBusyMaxM: 250,
+
   // ---- regen hold-fire discipline (dealing damage resets the 5 s out-of-combat regen timer). Strict: never in a 1v1 brawl.
   regenHoldHpFrac: 0.35,
   /** Hold fire only on targets farther than this that we cannot finish (hp > killableHp). */

@@ -183,6 +183,19 @@ export const LOCOMOTION = {
    */
   unstickLookaheadM: 30,
   unstickRadiusM: 6,
+
+  /** 2b FFA policy (only while world.lobby === "ffa") */
+  ffaNoApproach: true as boolean,
+  /** supply drops only when no tracked enemy is within this of the drop */
+  ffaDropClearM: 60,
+  /** silent walk when not under fire: speed <= ffaSilentStepFrac x sound.step_speed (patrol / loot / hunt / hold) */
+  ffaSilent: true as boolean,
+  ffaSilentStepFrac: 0.9,
+  /** patrol band of the next circle (practice: patrolInnerFrac..patrolOuterFrac) */
+  ffaPatrolInnerFrac: 0.65,
+  ffaPatrolOuterFrac: 0.85,
+  /** snowball hunt (drones / crates) only with no enemy mech listed at all */
+  ffaHuntNoMechListed: true as boolean,
 } as const
 
 export const MAP = {

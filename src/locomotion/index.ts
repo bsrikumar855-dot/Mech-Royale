@@ -140,6 +140,7 @@ export class EvasiveLocomotion implements Locomotion {
       if (sn.active && cur0 && map && blockedAhead(map, world, cur0, L.strafeBlockProbeM)) S.flipStrafe(t)
     }
     const perp = side()
+    const ffa = world.lobby === "ffa"
 
     // ---- pick a heading
     let dir: Vec2 | null = null
@@ -181,7 +182,7 @@ export class EvasiveLocomotion implements Locomotion {
         mode = "loot"
         const tl = toward(loot.x, loot.y)
         dir = tl ? norm(add(tl, perp, L.lootWeave)) : perp
-      } else if (sn.bearingDist > L.farM && hpFrac > L.approachMinHpFrac && inSafe(px, py)) {
+      } else if (!(ffa && L.ffaNoApproach) && sn.bearingDist > L.farM && hpFrac > L.approachMinHpFrac && inSafe(px, py)) {
         mode = "approach"
         dir = norm(add(perp, towardThreat, L.approachBlend))
       } else {
@@ -196,8 +197,9 @@ export class EvasiveLocomotion implements Locomotion {
         !sn.enemies.some((e) => e.dist < L.huntEnemyClearM) &&
         self.in_zone &&
         inSafe(px, py) &&
-        (self.cubes < L.huntCubeCap || !holdsLaser)
-      const loot = this.pickLoot(world, inSafe, Infinity, { hunt: huntOpen })
+        (self.cubes < L.huntCubeCap || !holdsLaser) &&
+        !(ffa && L.ffaHuntNoMechListed && sn.enemies.some((e) => e.listed))
+      const loot = this.pickLoot(world, inSafe, Infinity, { hunt: huntOpen, ffa })
       if (loot && loot.standoff !== undefined && loot.com) {
         // drone / crate: walk in until Combat has a shot line within the stand-off, then hold still while it shoots
         mode = "hunt"
@@ -228,7 +230,7 @@ export class EvasiveLocomotion implements Locomotion {
         mode = "hold" // wounded, safe and quiet: let the regen run
       } else {
         mode = "patrol"
-        dir = this.patrol(world, cur.center, cur.radius, nextC, z.next_radius)
+        dir = this.patrol(world, cur.center, cur.radius, nextC, z.next_radius, ffa)
       }
     }
 
@@ -259,7 +261,13 @@ export class EvasiveLocomotion implements Locomotion {
 
     this.lastMode = mode
     if (!dir) return { move: [0, 0], boost: false, jump }
-    const mag = clamp(Math.hypot(dir[0], dir[1]), 0, 1)
+    let mag = clamp(Math.hypot(dir[0], dir[1]), 0, 1)
+    const silentModes: readonly Mode[] = ["patrol", "loot", "hunt"]
+    if (ffa && L.ffaSilent && !underFire && silentModes.includes(mode)) {
+      const stepSpeed = cfg(world.config.sound, "step_speed", 0)
+      if (stepSpeed > 0) mag = Math.min(mag, (L.ffaSilentStepFrac * stepSpeed) / walk)
+      boost = false
+    }
     const unit: Vec2 = [dir[0] / mag, dir[1] / mag]
     let steered = steer(map, world, S, unit)
     // Unstick: the local feeler is boxed in. Ask the Dijkstra grid for a real route toward where we were already
@@ -280,7 +288,7 @@ export class EvasiveLocomotion implements Locomotion {
    * `hunt` (the v5 snowball gate is open): longer laser / drop / cube reach, plus NPC drones and crates as targets that
    * we approach to a stand-off so Combat shoots them. `cubesOnly`: the post-kill scoop under fire.
    */
-  private pickLoot(world: WorldModel, inSafe: (x: number, y: number) => boolean, maxDist: number, opts: { hunt?: boolean; cubesOnly?: boolean } = {}): LootPick | null {
+  private pickLoot(world: WorldModel, inSafe: (x: number, y: number) => boolean, maxDist: number, opts: { hunt?: boolean; cubesOnly?: boolean; ffa?: boolean } = {}): LootPick | null {
     const obs = world.obs!
     const self = world.self
     const [px, py] = self.pos
@@ -303,7 +311,8 @@ export class EvasiveLocomotion implements Locomotion {
     }
     if (!opts.cubesOnly) {
       for (const d of obs.drops ?? []) {
-        if ((d.holder === null || d.holder === self.id) && d.lands_in <= L.dropMaxLandsInS) consider(d.pos[0], d.pos[1], "supply_drop", hunt ? L.huntDropRangeM : L.dropRangeM, d.radius)
+        const contested = opts.ffa === true && world.enemies().some((e) => world.t - e.lastListedT <= world.rules.memoryS && dist2d(e.pos[0], e.pos[1], d.pos[0], d.pos[1]) < L.ffaDropClearM)
+        if ((d.holder === null || d.holder === self.id) && d.lands_in <= L.dropMaxLandsInS && !contested) consider(d.pos[0], d.pos[1], "supply_drop", hunt ? L.huntDropRangeM : L.dropRangeM, d.radius)
       }
       for (const pk of obs.pickups ?? []) {
         if (pk.kind === "laser" && !held.includes("laser")) consider(pk.pos[0], pk.pos[1], "laser", hunt ? L.huntLaserRangeM : L.laserPickupRangeM)
@@ -329,7 +338,7 @@ export class EvasiveLocomotion implements Locomotion {
   }
 
   /** Healthy and idle: circle the next zone's mid band so we keep moving and keep finding loot. */
-  private patrol(world: WorldModel, curC: readonly number[], curR: number, nextC: Vec2, nextR: number): Vec2 | null {
+  private patrol(world: WorldModel, curC: readonly number[], curR: number, nextC: Vec2, nextR: number, ffa = false): Vec2 | null {
     const [px, py] = world.self.pos
     const useNext = nextR >= L.patrolMinRadiusM
     const c: Vec2 = useNext ? nextC : [curC[0] as number, curC[1] as number]
@@ -338,7 +347,7 @@ export class EvasiveLocomotion implements Locomotion {
     if (d < 1e-6) return [1, 0]
     const u: Vec2 = [(px - c[0]) / d, (py - c[1]) / d]
     const tangent: Vec2 = [-u[1] * this.state.patrolSign, u[0] * this.state.patrolSign]
-    const mid = ((L.patrolInnerFrac + L.patrolOuterFrac) / 2) * R
+    const mid = (ffa ? (L.ffaPatrolInnerFrac + L.ffaPatrolOuterFrac) / 2 : (L.patrolInnerFrac + L.patrolOuterFrac) / 2) * R
     const radial = clamp((mid - d) / Math.max(1, 0.2 * R), -1, 1)
     return norm(add(tangent, u, radial))
   }

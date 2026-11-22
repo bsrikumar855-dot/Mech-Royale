@@ -42,6 +42,12 @@ export const ECONOMY = {
    * Weapons we take, best first. Laser: 315 hitscan damage at 280 m, +60% cook-off on mortar carriers.
    * Lightning: instant, 45 m cone. Mortar is still skipped (it exposes us to laser cook-off and we cannot lob yet).
    */
+  /**
+   * 2b FFA upgrade order: survival pool first (zone damage ignores armor and the last circle closes at 260 HP/s, so
+   * the biggest HP pool outlasts the collapse), then the practice order.
+   */
+  ffaUpgradeFirst: ["plating", "armor", "nanites"] as readonly string[],
+
   takeKinds: ["laser", "lightning"] as readonly string[],
 
   /** Swap lightning for a laser only when no visible enemy mech is closer than this (the swap costs equip time). */

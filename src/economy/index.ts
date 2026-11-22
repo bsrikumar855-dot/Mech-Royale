@@ -16,12 +16,13 @@ import type { Economy, EconomyOutput, LootTarget, TickContext } from "../types/c
 import type { OfferChoice, PickupObs, SelfObs } from "../types/mechfight.ts"
 
 /** Index of the best choice by priority (unlisted ids rank last; ties keep the server's order). Undefined if none. */
-export function bestUpgradeIndex(choices: readonly OfferChoice[]): number | undefined {
+export function bestUpgradeIndex(choices: readonly OfferChoice[], ffa = false): number | undefined {
+  const order = ffa ? [...ECONOMY.ffaUpgradeFirst, ...ECONOMY.upgradePriority.filter((id) => !ECONOMY.ffaUpgradeFirst.includes(id))] : ECONOMY.upgradePriority
   let best: number | undefined
   let bestRank = Infinity
   choices.forEach((c, i) => {
-    const r = ECONOMY.upgradePriority.indexOf(c.id)
-    const rank = r === -1 ? ECONOMY.upgradePriority.length : r
+    const r = order.indexOf(c.id)
+    const rank = r === -1 ? order.length : r
     if (rank < bestRank) {
       bestRank = rank
       best = i
@@ -61,7 +62,7 @@ export class RuleEconomy implements Economy {
     const out: EconomyOutput = { lootTargets: [] }
 
     if (obs.offer) {
-      const i = bestUpgradeIndex(obs.offer.choices)
+      const i = bestUpgradeIndex(obs.offer.choices, world.lobby === "ffa")
       if (i !== undefined) out.pick = i
     }
 

@@ -111,6 +111,28 @@ export function pickTarget(pool: readonly Cand[], p?: PriorityContext): Cand | n
   return best
 }
 
+/**
+ * 2b FFA restraint: shoot a mech only if it attacked us recently, is low enough to finish, is close enough to fight us
+ * anyway, or is busy fighting another mech (its aim is off us and on another tracked mech).
+ */
+export function ffaEngageable(world: WorldModel, c: Cand): boolean {
+  const t = world.t
+  if (world.damage.some((d) => d.by === c.id && t - d.t <= COMBAT.ffaAttackerMemoryS)) return true
+  if (c.dist <= COMBAT.ffaSelfDefenseM) return true
+  const a = c.a
+  if (!a) return false
+  if (c.hp !== undefined && (c.hp <= COMBAT.killableHp || (a.max_hp !== undefined && a.max_hp > 0 && c.hp / a.max_hp <= COMBAT.ffaLowHpFrac))) return true
+  const [sx, sy] = world.self.pos
+  const yaw = a.aim[0]
+  if (Math.abs(angleDiff(yaw, yawTo(a.pos[0], a.pos[1], sx, sy))) <= COMBAT.ffaBusyAimRad) return false
+  for (const o of world.enemies()) {
+    if (o.id === c.id || o.lastListedT !== t) continue
+    const d = Math.hypot(o.pos[0] - a.pos[0], o.pos[1] - a.pos[1])
+    if (d <= COMBAT.ffaBusyMaxM && Math.abs(angleDiff(yaw, yawTo(a.pos[0], a.pos[1], o.pos[0], o.pos[1]))) <= COMBAT.ffaBusyConeRad) return true
+  }
+  return false
+}
+
 /** The gun can fire: rounds in the magazine and not mid-reload. */
 export const gunReady = (gun: WeaponObs): boolean => (gun.ammo ?? 0) > 0 && (gun.reload ?? 0) === 0
 
@@ -255,6 +277,7 @@ export class RuleCombat implements Combat {
         .map(view)
         .filter((c) => c.los && c.dist <= Math.min(engageRange, COMBAT.npcEngageRangeM))
     }
+    if (COMBAT.ffaRestraint && world.lobby === "ffa") pool = pool.filter((c) => c.kind !== "mech" || ffaEngageable(world, c))
     const fullHp = cfgNum(world.config.mech as Record<string, unknown>, "hp", self.max_hp)
     const prio: PriorityContext = { holdsLaser: laser !== null, selfX: self.pos[0], selfY: self.pos[1], frontArcDeg: world.rules.frontArcDeg, fullHp }
     const target = pickTarget(pool, prio)
