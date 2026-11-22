@@ -12,7 +12,7 @@
  * between two walkable centres cannot exist. 8-connected moves, no corner cutting, cells next to blocked ones cost more
  * (stay mid-corridor). Fields are Dijkstra distances in metres (Infinity = unreachable / unknown).
  */
-import { NAV } from "../config/index.ts"
+import { MAP, NAV } from "../config/index.ts"
 import type { MapQuery } from "../world/map.ts"
 
 export interface NavBody {
@@ -177,7 +177,8 @@ export class NavGrid {
    */
   segmentClear(x0: number, y0: number, z: number, x1: number, y1: number): boolean {
     const len = Math.hypot(x1 - x0, y1 - y0)
-    const n = Math.max(1, Math.ceil(len / NAV.segmentStepM))
+    if (!Number.isFinite(len) || !Number.isFinite(z)) return false // los-guard: never walk toward a non-finite point
+    const n = Math.min(MAP.terrainLosMaxSteps, Math.max(1, Math.ceil(len / NAV.segmentStepM)))
     const body = { radius: this.body.radius, height: this.body.height, stepUp: this.body.stepUp }
     let fz = z
     for (let s = 1; s <= n; s++) {

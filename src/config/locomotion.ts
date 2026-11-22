@@ -242,6 +242,11 @@ export const MAP = {
   treeCellM: 16,
   /** Terrain-vs-ray sampling step (the heightfield itself has a 1 m grid). */
   terrainLosStepM: 1,
+  /**
+   * Hard cap on terrain samples per line-of-sight query (los-guard). The arena diagonal is ~1300 m, so a real query
+   * never reaches it; it only bounds the cost of an absurd input (an enemy reported 1e308 m away hung the bot).
+   */
+  terrainLosMaxSteps: 4096,
   slopeProbeM: 0.5,
   /** Vertical tolerance when comparing a ray/feet height to a surface. */
   zEps: 0.05,

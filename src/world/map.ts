@@ -274,8 +274,11 @@ export class MapQuery {
   // ---------------------------------------------------------------- line of sight
 
   private terrainBlocks(a: P3, b: P3): boolean {
+    // los-guard: a non-finite end point is treated as blocked, and the sample count is capped (never hang a tick)
+    if (!(Number.isFinite(a[0]) && Number.isFinite(a[1]) && Number.isFinite(a[2]) && Number.isFinite(b[0]) && Number.isFinite(b[1]) && Number.isFinite(b[2]))) return true
     const len = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2])
-    const n = Math.max(1, Math.ceil(len / MAP.terrainLosStepM))
+    if (!Number.isFinite(len)) return true
+    const n = Math.min(MAP.terrainLosMaxSteps, Math.max(1, Math.ceil(len / MAP.terrainLosStepM)))
     for (let k = 0; k <= n; k++) {
       const t = k / n
       const x = a[0] + (b[0] - a[0]) * t
