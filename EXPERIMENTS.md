@@ -113,3 +113,17 @@ for FFA A/Bs and for bug forensics (behaviour that is wrong against any opponent
 Board keep rule: a probe must beat 4.31 by >= 0.3 to become best-known-good; 4.0-4.6 is inconclusive. Probes are ONE change
 off c9aebde: P1 = 1a only, P2 = 1f only, P3 = FFA v1 only (detector + policy; checks real practice neutrality and gives a
 scored build that can be picked for the final). FFA is frozen at v1 unless the sim shows >= +0.3 over v1 at n >= 128.
+
+### Bug forensics (sim practice, 96 matches of c9aebde, traced; replay of our Bot matched 68,722/68,722 actions)
+
+| Signal | Measured | Verdict |
+| --- | --- | --- |
+| Airborne under threat | 70% of threatened ticks airborne (hops); 6.5 vs 4.6 dmg/tick grounded (+41%); 79/96 deaths airborne | tactic, board probe P2 (hops off) |
+| Gun withheld with a shot | of 25,786 shootable ticks: fired 22%, cooldown 27%, reloading 34%, ready-but-held 17% (regen hold 12.8%, aim/slew gate 3.6%, beyond 0.9 x range 0.3%) | regen hold is a tactic; no gate bug |
+| Reload share | 34% of shootable time mid-reload; gun_mag (+8 rounds, -20% reload) = +31% sustained DPS vs gun_damage +15%, gun_rate +7.6% (our #1 pick) | mis-ranked upgrade: probe P4 |
+| Stuck on terrain banks | 14 runs >= 1 s (up to 87 s) in 4/96 matches, all in the stadium bowl; 3 of 4 ended in a zone death; feeler checks terrain only under the centre line | clear bug: probe P5 (stuck runs 14 -> 0, pinned ticks 10.4% -> 3.2%, zone dmg 67 -> 24 /match in the sim) |
+| Standing still while seen | 2.0% of seen ticks, all strafe reversals | fine |
+| Second weapon | 37/96 matches get laser/lightning (median 10 s); slot empty 29% of time after 60 s | loot tactic |
+| Offers / latency / fallbacks | 86 offers, 0 unanswered; 0 missing answers | fine |
+
+Board probes (each ONE change off c9aebde): P1 3ba914d (1a), P2 286d48c (1f), P3 6b3c3a7 (FFA v1), P4 fa60a9a (gun_mag first), P5 11e07d6 (stuck escape).
