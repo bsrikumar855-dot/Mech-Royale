@@ -356,28 +356,28 @@ describe("submission 5: anti-blink proactive reload", () => {
     return (t: number, ammo: number, mechs: ReturnType<typeof enemy>[] = []) =>
       fight((o) => { o.t = t; o.tick = Math.round(t * 20); o.self.weapons[0]!.ammo = ammo; o.mechs = mechs }, { combat, world })
   }
-  test("suppressed 0.2 s and 1.0 s after LOS was lost; fires once >= 1.5 s have passed", () => {
+  const D = COMBAT.proactiveReloadDelayS
+  test("suppressed until proactiveReloadDelayS after LOS was lost; fires once it has passed", () => {
     const tick = seq()
     assert.equal(tick(10, 5, [enemy(5, [100, 0, 0])]).reload, false, "LOS now")
     assert.equal(tick(10.2, 5).reload, false, "0.2 s")
-    assert.equal(tick(11.0, 5).reload, false, "1.0 s")
-    assert.equal(tick(11.4, 5).reload, false, "1.4 s")
-    assert.equal(tick(11.5, 5).reload, true, "1.5 s")
+    assert.equal(tick(10 + D - 0.1, 5).reload, false, "just before the delay")
+    assert.equal(tick(10 + D + 0.05, 5).reload, true, "past the delay")
   })
   test("an empty magazine reloads immediately, even right after LOS", () => {
     const tick = seq()
     tick(10, 5, [enemy(5, [100, 0, 0])])
     assert.equal(tick(10.2, 0).reload, true)
   })
-  test("a re-peek restarts the 1.5 s clock", () => {
+  test("a re-peek restarts the clock", () => {
     const tick = seq()
     tick(10, 5, [enemy(5, [100, 0, 0])])
-    tick(11.0, 5)
-    tick(11.2, 5, [enemy(5, [100, 0, 0])])
-    assert.equal(tick(12.6, 5).reload, false, "1.4 s since the re-peek")
-    assert.equal(tick(12.8, 5).reload, true)
+    tick(10.6, 5)
+    tick(10.8, 5, [enemy(5, [100, 0, 0])])
+    assert.equal(tick(10.8 + D - 0.1, 5).reload, false, "just before the delay since the re-peek")
+    assert.equal(tick(10.8 + D + 0.1, 5).reload, true)
   })
-  test("blocked while a tracked enemy is within 35 m, even after 1.5 s", () => {
+  test("blocked while a tracked enemy is within 35 m, even after the delay", () => {
     const near = seq()
     near(10, 5, [enemy(5, [30, 0, 0])])
     assert.equal(near(11.6, 5).reload, false)
