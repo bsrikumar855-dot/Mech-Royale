@@ -79,7 +79,7 @@ export const COMBAT = {
    * ...and only after no enemy mech has had a clear shot line for this long (anti-blink: a 2.4 s reload must not
    * start because a target flickered behind a pillar or trunk for one decision)...
    */
-  proactiveReloadDelayS: 1.5,
+  proactiveReloadDelayS: 1.1,
   /** ...and no tracked enemy mech is within this distance. An empty magazine always reloads at once. */
   proactiveReloadClearM: 35,
 
